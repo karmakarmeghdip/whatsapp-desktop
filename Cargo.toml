@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { git = "https://github.com/iced-rs/iced.git" }
+heroicons = "0.2.0"
+iced = { git = "https://github.com/iced-rs/iced.git", features = ["svg"] }
+iced_lucide = "0.1.0"
+icondata = "0.7.0"
