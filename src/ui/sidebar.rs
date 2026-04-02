@@ -42,6 +42,10 @@ pub fn view<'a>(chats: &'a [Chat], selected_chat: Option<usize>) -> Element<'a, 
     )
     .width(Length::Fixed(300.0))
     .height(Length::Fill)
-    .style(container::bordered_box)
+    .style(|theme: &iced::Theme| {
+        let mut style = iced::widget::container::bordered_box(theme);
+        style.border.radius = 0.0.into();
+        style
+    })
     .into()
 }

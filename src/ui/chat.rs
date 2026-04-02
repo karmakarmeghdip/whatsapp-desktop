@@ -8,7 +8,11 @@ pub fn view<'a>(chat_name: &'a str, messages: &'a [ChatMessage], input_value: &'
     )
     .padding(20)
     .width(Length::Fill)
-    .style(container::bordered_box);
+    .style(|theme: &iced::Theme| {
+        let mut style = iced::widget::container::bordered_box(theme);
+        style.border.radius = 0.0.into();
+        style
+    });
 
     let mut message_list = column![].spacing(10).padding(20);
     for msg in messages {
@@ -79,7 +83,11 @@ pub fn view<'a>(chat_name: &'a str, messages: &'a [ChatMessage], input_value: &'
     )
     .padding(20)
     .width(Length::Fill)
-    .style(container::bordered_box);
+    .style(|theme: &iced::Theme| {
+        let mut style = iced::widget::container::bordered_box(theme);
+        style.border.radius = 0.0.into();
+        style
+    });
 
     column![
         header,
