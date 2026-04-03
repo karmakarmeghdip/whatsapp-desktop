@@ -4,7 +4,33 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-heroicons = "0.2.0"
-iced = { git = "https://github.com/iced-rs/iced.git", features = ["svg"] }
-iced_lucide = "0.1.0"
+# UI Framework
+iced = { git = "https://github.com/iced-rs/iced.git", features = ["svg", "tokio", "sipper"] }
 icondata = "0.7.0"
+
+# WhatsApp API (with stable Rust support - SIMD disabled)
+whatsapp-rust = { version = "0.5", default-features = false, features = [
+    "sqlite-storage",
+    "tokio-transport",
+    "tokio-runtime",
+    "ureq-client",
+    "tokio-native",
+    "signal",
+    "moka-cache",
+] }
+whatsapp-rust-sqlite-storage = "0.5"
+whatsapp-rust-tokio-transport = "0.5"
+whatsapp-rust-ureq-http-client = "0.5"
+wacore = { version = "0.5", default-features = false }
+wacore-binary = { version = "0.5", default-features = false }
+waproto = "0.5"
+
+# Async runtime
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "fs", "time"] }
+futures = "0.3"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+dirs = "5.0"
