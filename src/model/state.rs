@@ -3,7 +3,7 @@
 //! This is the main model that holds all application data.
 
 use std::collections::HashMap;
-use crate::whatsapp::{self, Jid, TypingState};
+use crate::whatsapp::{self, Connection, Jid, TypingState};
 use super::chat::{Chat, ChatMessage, MessageStatus};
 use super::connection::{ConnectionState, ViewState};
 
@@ -13,6 +13,8 @@ pub struct AppState {
     // Connection state
     /// Current connection to WhatsApp
     pub connection: ConnectionState,
+    /// Handle for sending commands to WhatsApp
+    pub whatsapp: Option<Connection>,
     /// Which view to display
     pub view: ViewState,
     /// QR code data (if available for pairing)
@@ -160,6 +162,16 @@ impl AppState {
     }
 
     // --- Connection state ---
+
+    /// Set the WhatsApp connection handle
+    pub fn set_whatsapp_connection(&mut self, connection: Connection) {
+        self.whatsapp = Some(connection);
+    }
+
+    /// Clear the WhatsApp connection (on disconnect/logout)
+    pub fn clear_whatsapp_connection(&mut self) {
+        self.whatsapp = None;
+    }
 
     /// Update connection state and adjust view accordingly
     pub fn set_connection_state(&mut self, state: ConnectionState) {

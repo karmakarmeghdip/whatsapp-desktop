@@ -1,5 +1,6 @@
 //! WhatsApp events for the UI layer
 
+use super::client::Connection;
 use super::types::*;
 
 /// Events emitted by the WhatsApp client for UI updates
@@ -18,8 +19,8 @@ pub enum WhatsAppEvent {
         code: String,
     },
 
-    /// Successfully paired and connected
-    Connected,
+    /// Successfully paired and connected (includes connection handle for sending)
+    Connected(Connection),
 
     /// Disconnected from WhatsApp
     Disconnected,

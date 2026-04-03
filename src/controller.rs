@@ -6,7 +6,7 @@
 
 use iced::Task;
 use crate::model::{AppState, ConnectionState, MessageStatus, ViewState};
-use crate::whatsapp::{self, Jid, WhatsAppEvent};
+use crate::whatsapp::{self, Jid, WhatsAppEvent, WhatsAppCommand};
 
 /// Application message enum - all possible events that can update the model
 #[derive(Debug, Clone)]
@@ -49,9 +49,17 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 // Add pending message for immediate UI feedback
                 state.add_pending_message(&jid, text.clone());
                 
-                // TODO: Send via WhatsApp connection
-                // Return a task that sends the message through the WhatsApp client
-                log::info!("Sending message to {}: {}", jid.0, text);
+                // Send via WhatsApp connection
+                if let Some(ref mut connection) = state.whatsapp {
+                    log::info!("Sending message to {}: {}", jid.0, text);
+                    connection.send(WhatsAppCommand::SendMessage { 
+                        chat_jid: jid, 
+                        text 
+                    });
+                } else {
+                    log::warn!("Cannot send message: not connected to WhatsApp");
+                    state.set_error("Not connected to WhatsApp".to_string());
+                }
             }
             Task::none()
         }
@@ -85,16 +93,19 @@ fn handle_whatsapp_event(state: &mut AppState, event: WhatsAppEvent) -> Task<Mes
             state.qr_code = Some(qr_code);
         }
 
-        WhatsAppEvent::Connected => {
+        WhatsAppEvent::Connected(connection) => {
             log::info!("Connected to WhatsApp");
+            state.set_whatsapp_connection(connection);
         }
 
         WhatsAppEvent::Disconnected => {
             log::warn!("Disconnected from WhatsApp");
+            state.clear_whatsapp_connection();
         }
 
         WhatsAppEvent::LoggedOut => {
             log::warn!("Logged out from WhatsApp");
+            state.clear_whatsapp_connection();
         }
 
         WhatsAppEvent::MessageReceived(msg) => {

@@ -107,7 +107,10 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
 
             // Create a channel for the event handler to send events back
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
-            let (_command_tx, mut command_rx) = mpsc::channel::<WhatsAppCommand>(100);
+            let (command_tx, mut command_rx) = mpsc::channel::<WhatsAppCommand>(100);
+            
+            // Create the connection handle that will be passed to the UI
+            let connection = Connection(command_tx);
 
             // Build the bot with event forwarding
             let event_tx_clone = event_tx.clone();
@@ -138,9 +141,25 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
             // Get the client handle for sending messages
             let client = bot.client();
 
-            // Start the bot in a separate task
-            let mut bot_handle = tokio::spawn(async move {
-                let _ = bot.run().await;
+            // Start the bot and get the handle
+            log::info!("Starting bot...");
+            let bot_handle_result = bot.run().await;
+            let bot_join_handle = match bot_handle_result {
+                Ok(handle) => {
+                    log::info!("Bot started successfully, waiting for events...");
+                    handle
+                }
+                Err(e) => {
+                    log::error!("Failed to start bot: {}", e);
+                    output.send(WhatsAppEvent::Error(format!("Failed to start bot: {}", e))).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+
+            // Run the bot handle in a separate task (this keeps the connection alive)
+            let mut bot_task = tokio::spawn(async move {
+                let _ = bot_join_handle.await;
             });
 
             // Process events from the bot
@@ -169,7 +188,7 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                             }
                             Event::Connected(_) => {
                                 log::info!("Connected to WhatsApp");
-                                output.send(WhatsAppEvent::Connected).await;
+                                output.send(WhatsAppEvent::Connected(connection.clone())).await;
                                 output.send(WhatsAppEvent::ConnectionStateChanged(
                                     ConnectionState::Connected,
                                 )).await;
@@ -342,7 +361,8 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                     }
 
                     // Bot task ended
-                    _ = &mut bot_handle => {
+                    _ = &mut bot_task => {
+                        log::warn!("Bot task ended unexpectedly");
                         break;
                     }
                 }
