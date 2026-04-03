@@ -5,7 +5,7 @@
 //! 
 //! Views emit Messages that the controller handles to update the model.
 
-mod chat;
+pub(crate) mod chat;
 mod loading;
 mod main_view;
 mod pairing;

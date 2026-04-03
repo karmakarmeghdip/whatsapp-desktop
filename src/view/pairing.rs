@@ -1,18 +1,17 @@
 //! Pairing view - QR code display for WhatsApp linking
 
-use iced::widget::{center, column, container, text, Space};
+use iced::widget::{center, column, container, qr_code, text, Space};
 use iced::{Alignment, Element, Length};
 use crate::controller::Message;
 
 /// Pairing view with QR code display
-pub fn pairing<'a>(qr_code: Option<&'a str>) -> Element<'a, Message> {
-    let content = if let Some(qr) = qr_code {
+pub fn pairing<'a>(qr_data: Option<&'a qr_code::Data>) -> Element<'a, Message> {
+    let content = if let Some(data) = qr_data {
         column![
             text("Scan QR Code").size(28),
             Space::new().height(20),
             container(
-                // Display QR code as text (TODO: render as actual QR image)
-                text(qr).size(8).font(iced::Font::MONOSPACE)
+                qr_code(data).cell_size(5)
             )
             .padding(20)
             .style(|theme: &iced::Theme| {

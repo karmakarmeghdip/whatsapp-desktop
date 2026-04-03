@@ -57,7 +57,10 @@ impl App {
 
     /// Background subscriptions - WhatsApp connection
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(whatsapp::connect).map(Message::WhatsApp)
+        Subscription::batch([
+            Subscription::run(whatsapp::connect).map(Message::WhatsApp),
+            iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::Tick),
+        ])
     }
 }
 

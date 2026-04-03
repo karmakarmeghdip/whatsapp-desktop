@@ -10,7 +10,7 @@ use super::{loading, pairing, settings, sidebar, chat};
 pub fn render(state: &AppState) -> Element<'_, Message> {
     match state.view {
         ViewState::Loading => loading::loading(),
-        ViewState::Pairing => pairing::pairing(state.qr_code.as_deref()),
+        ViewState::Pairing => pairing::pairing(state.qr_code_data.as_ref()),
         ViewState::Settings => settings::settings(),
         ViewState::Chats => chats_view(state),
     }
@@ -21,6 +21,7 @@ fn chats_view(state: &AppState) -> Element<'_, Message> {
     let sidebar = sidebar::sidebar(
         &state.chats,
         state.selected_chat.as_ref(),
+        if state.sync_in_progress { state.sync_progress } else { None },
     );
 
     let chat_area = if let Some(chat) = state.selected_chat() {
@@ -29,6 +30,7 @@ fn chats_view(state: &AppState) -> Element<'_, Message> {
             state.selected_messages(),
             &state.input_value,
             state.selected_typing_state(),
+            state.loading_older_messages,
         )
     } else {
         chat::empty_view()

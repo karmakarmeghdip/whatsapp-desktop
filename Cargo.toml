@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # UI Framework
-iced = { git = "https://github.com/iced-rs/iced.git", features = ["svg", "tokio", "sipper"] }
+iced = { git = "https://github.com/iced-rs/iced.git", features = ["svg", "tokio", "sipper", "qr_code"] }
 icondata = "0.7.0"
 
 # WhatsApp API (with stable Rust support - SIMD disabled)
@@ -31,6 +31,8 @@ futures = "0.3"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 log = "0.4"
 env_logger = "0.11"
 dirs = "5.0"

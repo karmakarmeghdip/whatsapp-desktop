@@ -7,7 +7,11 @@ use crate::model::Chat;
 use crate::whatsapp::Jid;
 
 /// Render the sidebar with chat list
-pub fn sidebar<'a>(chats: &'a [Chat], selected_chat: Option<&'a Jid>) -> Element<'a, Message> {
+pub fn sidebar<'a>(
+    chats: &'a [Chat],
+    selected_chat: Option<&'a Jid>,
+    sync_progress: Option<(u32, u32)>,
+) -> Element<'a, Message> {
     let mut chat_list = column![].spacing(5).padding(10);
 
     // Sort chats: pinned first
@@ -95,6 +99,18 @@ pub fn sidebar<'a>(chats: &'a [Chat], selected_chat: Option<&'a Jid>) -> Element
         );
     }
 
+    let sync_banner = if let Some((current, total)) = sync_progress {
+        let label = if total > 0 {
+            format!("Syncing chats: {}/{}", current, total)
+        } else {
+            format!("Syncing chats: {}", current)
+        };
+
+        container(text(label).size(13)).padding([6, 12]).width(Length::Fill)
+    } else {
+        container(Space::new()).padding(0)
+    };
+
     container(
         column![
             // Header
@@ -106,6 +122,7 @@ pub fn sidebar<'a>(chats: &'a [Chat], selected_chat: Option<&'a Jid>) -> Element
             )
             .padding(15)
             .width(Length::Fill),
+            sync_banner,
             // Chat list
             scrollable(chat_list).height(Length::Fill)
         ],

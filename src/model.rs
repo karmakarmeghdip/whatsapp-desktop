@@ -5,6 +5,7 @@
 //! and modified by the controller in response to user actions and external events.
 
 mod chat;
+mod cache;
 mod connection;
 mod state;
 

@@ -6,12 +6,17 @@ use crate::controller::Message;
 use crate::model::{ChatMessage, MessageStatus};
 use crate::whatsapp::TypingState;
 
+pub fn messages_scroll_id() -> &'static str {
+    "messages-scroll"
+}
+
 /// Render the chat view with messages and input
 pub fn chat_view<'a>(
     chat_name: &'a str,
     messages: &'a [ChatMessage],
     input_value: &'a str,
     typing: Option<TypingState>,
+    loading_older_messages: bool,
 ) -> Element<'a, Message> {
     // Header
     let header = container(
@@ -95,7 +100,16 @@ pub fn chat_view<'a>(
         }
     }
 
-    let messages_scroll = scrollable(message_list).height(Length::Fill);
+    if loading_older_messages {
+        message_list = message_list.push(
+            container(text("Loading older messages...").size(13)).padding(8),
+        );
+    }
+
+    let messages_scroll = scrollable(message_list)
+        .height(Length::Fill)
+        .id(messages_scroll_id())
+        .on_scroll(Message::MessageListScrolled);
 
     // Input area
     let input_area = container(

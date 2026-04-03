@@ -16,6 +16,16 @@ impl Jid {
         self.0.split('@').next().unwrap_or(&self.0)
     }
 
+    /// Extract user part without device suffix (e.g. `12345:12` -> `12345`)
+    pub fn normalized_user(&self) -> String {
+        self.user().split(':').next().unwrap_or(self.user()).to_string()
+    }
+
+    /// Best effort display label for a JID
+    pub fn display_label(&self) -> String {
+        self.normalized_user()
+    }
+
     /// Check if this is a group JID
     pub fn is_group(&self) -> bool {
         self.0.contains("@g.us")
@@ -156,8 +166,10 @@ impl MessageContent {
     pub fn preview(&self) -> String {
         match self {
             MessageContent::Text(text) => {
-                if text.len() > 50 {
-                    format!("{}...", &text[..47])
+                let char_count = text.chars().count();
+                if char_count > 50 {
+                    let truncated: String = text.chars().take(47).collect();
+                    format!("{}...", truncated)
                 } else {
                     text.clone()
                 }

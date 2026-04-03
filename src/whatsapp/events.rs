@@ -33,8 +33,16 @@ pub enum WhatsAppEvent {
 
     /// Message sent successfully
     MessageSent {
+        local_id: String,
         message_id: String,
         chat_jid: Jid,
+    },
+
+    /// Message failed to send
+    MessageSendFailed {
+        local_id: String,
+        chat_jid: Jid,
+        error: String,
     },
 
     /// Message status updated (delivered, read, etc.)
@@ -49,6 +57,12 @@ pub enum WhatsAppEvent {
 
     /// Single chat updated
     ChatUpdated(Chat),
+
+    /// Contact name metadata updated
+    ContactNameUpdated {
+        jid: Jid,
+        name: String,
+    },
 
     /// Typing indicator received
     TypingIndicator {

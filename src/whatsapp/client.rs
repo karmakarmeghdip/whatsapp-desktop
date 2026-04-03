@@ -8,6 +8,7 @@ use std::sync::Arc;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
 use iced::task::{Never, Sipper, sipper};
+use chrono::{DateTime, Utc};
 
 use super::events::WhatsAppEvent;
 use super::types::*;
@@ -24,11 +25,19 @@ use whatsapp_rust::ChatStateType;
 #[derive(Debug, Clone)]
 pub enum WhatsAppCommand {
     /// Send a text message
-    SendMessage { chat_jid: Jid, text: String },
+    SendMessage { local_id: String, chat_jid: Jid, text: String },
     /// Send typing indicator
     SendTyping { chat_jid: Jid, typing: bool },
     /// Mark chat as read
     MarkAsRead { chat_jid: Jid },
+    /// Fetch older history for a chat via PDO
+    FetchHistory {
+        chat_jid: Jid,
+        oldest_msg_id: String,
+        oldest_msg_from_me: bool,
+        oldest_msg_timestamp_ms: i64,
+        count: i32,
+    },
     /// Disconnect from WhatsApp
     Disconnect,
 }
@@ -45,7 +54,11 @@ impl Connection {
 
     /// Send a text message
     pub fn send_message(&mut self, chat_jid: Jid, text: String) {
-        self.send(WhatsAppCommand::SendMessage { chat_jid, text });
+        self.send(WhatsAppCommand::SendMessage {
+            local_id: format!("manual_{}", Utc::now().timestamp_millis()),
+            chat_jid,
+            text,
+        });
     }
 
     /// Send typing indicator
@@ -71,7 +84,6 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
         use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
         use whatsapp_rust_ureq_http_client::UreqHttpClient;
         use wacore::types::events::Event;
-        use wacore::proto_helpers::MessageExt;
 
         loop {
             // Attempt to connect to WhatsApp
@@ -162,6 +174,9 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                 let _ = bot_join_handle.await;
             });
 
+            let mut sync_current: u32 = 0;
+            let mut sync_total_hint: Option<u32> = None;
+
             // Process events from the bot
             loop {
                 tokio::select! {
@@ -210,45 +225,7 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                             }
                             Event::Message(msg, info) => {
                                 // Convert WhatsApp message to our type
-                                let content = if let Some(text) = msg.text_content() {
-                                    MessageContent::Text(text.to_string())
-                                } else if let Some(img) = &msg.image_message {
-                                    MessageContent::Image {
-                                        caption: img.caption.clone(),
-                                        url: img.url.clone(),
-                                        thumbnail: img.jpeg_thumbnail.clone(),
-                                    }
-                                } else if let Some(vid) = &msg.video_message {
-                                    MessageContent::Video {
-                                        caption: vid.caption.clone(),
-                                        url: vid.url.clone(),
-                                        thumbnail: vid.jpeg_thumbnail.clone(),
-                                    }
-                                } else if let Some(aud) = &msg.audio_message {
-                                    MessageContent::Audio {
-                                        url: aud.url.clone(),
-                                        duration_secs: aud.seconds.unwrap_or(0),
-                                        is_voice_note: aud.ptt.unwrap_or(false),
-                                    }
-                                } else if let Some(doc) = &msg.document_message {
-                                    MessageContent::Document {
-                                        filename: doc.file_name.clone().unwrap_or_default(),
-                                        url: doc.url.clone(),
-                                        mime_type: doc.mimetype.clone(),
-                                    }
-                                } else if let Some(sticker) = &msg.sticker_message {
-                                    MessageContent::Sticker {
-                                        url: sticker.url.clone(),
-                                    }
-                                } else if let Some(loc) = &msg.location_message {
-                                    MessageContent::Location {
-                                        latitude: loc.degrees_latitude.unwrap_or(0.0),
-                                        longitude: loc.degrees_longitude.unwrap_or(0.0),
-                                        name: loc.name.clone(),
-                                    }
-                                } else {
-                                    MessageContent::Unknown
-                                };
+                                let content = parse_message_content(msg.as_ref());
 
                                 let chat_message = ChatMessage {
                                     id: info.id.clone(),
@@ -260,6 +237,15 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                     status: MessageStatus::Delivered,
                                     quoted_message: None,
                                 };
+
+                                if !info.push_name.is_empty() {
+                                    output
+                                        .send(WhatsAppEvent::ContactNameUpdated {
+                                            jid: Jid::new(info.source.sender.to_string()),
+                                            name: info.push_name.clone(),
+                                        })
+                                        .await;
+                                }
 
                                 output.send(WhatsAppEvent::MessageReceived(chat_message)).await;
                             }
@@ -301,13 +287,143 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                 })).await;
                             }
                             Event::OfflineSyncPreview(preview) => {
+                                sync_current = 0;
+                                sync_total_hint = Some(preview.total.max(0) as u32);
                                 output.send(WhatsAppEvent::HistorySyncProgress {
                                     current: 0,
                                     total: preview.total as u32,
                                 }).await;
                             }
                             Event::OfflineSyncCompleted(_sync) => {
+                                sync_total_hint = None;
                                 output.send(WhatsAppEvent::HistorySyncCompleted).await;
+                            }
+                            Event::JoinedGroup(lazy_conv) => {
+                                if let Some(conv) = lazy_conv.get() {
+                                    let id = conv.id.clone();
+                                    if !id.is_empty() {
+                                        let jid = Jid::new(id.clone());
+                                        let name = conv
+                                            .display_name
+                                            .clone()
+                                            .or_else(|| conv.name.clone())
+                                            .or_else(|| conv.username.clone())
+                                            .or_else(|| conv.pn_jid.as_ref().map(|jid| Jid::new(jid.clone()).display_label()))
+                                            .unwrap_or_else(|| Jid::new(id.clone()).display_label());
+
+                                        let last_activity = conv
+                                            .conversation_timestamp
+                                            .or(conv.last_msg_timestamp)
+                                            .and_then(|ts| DateTime::<Utc>::from_timestamp(ts as i64, 0));
+
+                                        let chat = Chat {
+                                            jid,
+                                            name,
+                                            last_message: None,
+                                            last_activity,
+                                            is_group: id.contains("@g.us"),
+                                            unread_count: conv.unread_count.unwrap_or(0),
+                                            is_muted: conv.mute_end_time.unwrap_or(0) > 0,
+                                            is_pinned: conv.pinned.unwrap_or(0) > 0,
+                                        };
+
+                                        output.send(WhatsAppEvent::ChatUpdated(chat)).await;
+
+                                        if let Some(full_conv) = lazy_conv.get_with_messages() {
+                                            for item in full_conv.messages {
+                                                let Some(web) = item.message else { continue; };
+                                                let Some(message) = web.message else { continue; };
+
+                                                let chat_jid = web
+                                                    .key
+                                                    .remote_jid
+                                                    .clone()
+                                                    .unwrap_or_else(|| id.clone());
+                                                let sender_jid = web
+                                                    .key
+                                                    .participant
+                                                    .clone()
+                                                    .or_else(|| web.key.remote_jid.clone())
+                                                    .unwrap_or_else(|| chat_jid.clone());
+
+                                                let content = parse_message_content(&message);
+
+                                                let timestamp = web
+                                                    .message_timestamp
+                                                    .and_then(|ts| DateTime::<Utc>::from_timestamp(ts as i64, 0))
+                                                    .unwrap_or_else(Utc::now);
+
+                                                let history_msg = ChatMessage {
+                                                    id: web.key.id.unwrap_or_else(|| {
+                                                        format!("history_{}_{}", chat_jid, timestamp.timestamp_millis())
+                                                    }),
+                                                    sender: Jid::new(sender_jid),
+                                                    chat: Jid::new(chat_jid),
+                                                    content,
+                                                    timestamp,
+                                                    is_from_me: web.key.from_me.unwrap_or(false),
+                                                    status: MessageStatus::Delivered,
+                                                    quoted_message: None,
+                                                };
+
+                                                output.send(WhatsAppEvent::MessageReceived(history_msg)).await;
+                                            }
+                                        }
+
+                                        sync_current = sync_current.saturating_add(1);
+                                        let total = sync_total_hint.unwrap_or(sync_current).max(sync_current);
+                                        output
+                                            .send(WhatsAppEvent::HistorySyncProgress {
+                                                current: sync_current,
+                                                total,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            Event::ContactUpdate(update) => {
+                                let name = update
+                                    .action
+                                    .full_name
+                                    .clone()
+                                    .or(update.action.first_name.clone());
+
+                                if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
+                                    output
+                                        .send(WhatsAppEvent::ContactNameUpdated {
+                                            jid: Jid::new(update.jid.to_string()),
+                                            name: name.clone(),
+                                        })
+                                        .await;
+
+                                    if let Some(pn_jid) = update.action.pn_jid.as_ref() {
+                                        output
+                                            .send(WhatsAppEvent::ContactNameUpdated {
+                                                jid: Jid::new(pn_jid.clone()),
+                                                name: name.clone(),
+                                            })
+                                            .await;
+                                    }
+
+                                    if let Some(lid_jid) = update.action.lid_jid.as_ref() {
+                                        output
+                                            .send(WhatsAppEvent::ContactNameUpdated {
+                                                jid: Jid::new(lid_jid.clone()),
+                                                name,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            Event::PushNameUpdate(update) => {
+                                if !update.new_push_name.trim().is_empty() {
+                                    output
+                                        .send(WhatsAppEvent::ContactNameUpdated {
+                                            jid: Jid::new(update.jid.to_string()),
+                                            name: update.new_push_name,
+                                        })
+                                        .await;
+                                }
                             }
                             _ => {
                                 // Handle other events as needed
@@ -318,7 +434,7 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                     // Handle commands from UI
                     Some(command) = command_rx.next() => {
                         match command {
-                            WhatsAppCommand::SendMessage { chat_jid, text } => {
+                            WhatsAppCommand::SendMessage { local_id, chat_jid, text } => {
                                 use waproto::whatsapp as wa;
                                 use wacore_binary::jid::Jid as WaJid;
 
@@ -332,9 +448,34 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                 let jid_str = &chat_jid.0;
                                 if let Some((user, server)) = jid_str.split_once('@') {
                                     let wa_jid = WaJid::new(user, server);
-                                    if let Err(e) = client.send_message(wa_jid, message).await {
-                                        output.send(WhatsAppEvent::Error(format!("Failed to send message: {}", e))).await;
+                                    match client.send_message(wa_jid, message).await {
+                                        Ok(message_id) => {
+                                            output
+                                                .send(WhatsAppEvent::MessageSent {
+                                                    local_id,
+                                                    message_id,
+                                                    chat_jid,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            output
+                                                .send(WhatsAppEvent::MessageSendFailed {
+                                                    local_id,
+                                                    chat_jid,
+                                                    error: e.to_string(),
+                                                })
+                                                .await;
+                                        }
                                     }
+                                } else {
+                                    output
+                                        .send(WhatsAppEvent::MessageSendFailed {
+                                            local_id,
+                                            chat_jid,
+                                            error: "Invalid chat JID".to_string(),
+                                        })
+                                        .await;
                                 }
                             }
                             WhatsAppCommand::SendTyping { chat_jid, typing } => {
@@ -353,6 +494,36 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                             }
                             WhatsAppCommand::MarkAsRead { chat_jid: _ } => {
                                 // Mark messages as read - would need message IDs in practice
+                            }
+                            WhatsAppCommand::FetchHistory {
+                                chat_jid,
+                                oldest_msg_id,
+                                oldest_msg_from_me,
+                                oldest_msg_timestamp_ms,
+                                count,
+                            } => {
+                                use wacore_binary::jid::Jid as WaJid;
+
+                                let jid_str = &chat_jid.0;
+                                if let Some((user, server)) = jid_str.split_once('@') {
+                                    let wa_jid = WaJid::new(user, server);
+                                    if let Err(error) = client
+                                        .fetch_message_history(
+                                            &wa_jid,
+                                            &oldest_msg_id,
+                                            oldest_msg_from_me,
+                                            oldest_msg_timestamp_ms,
+                                            count,
+                                        )
+                                        .await
+                                    {
+                                        log::warn!(
+                                            "Failed to fetch history for {}: {}",
+                                            chat_jid,
+                                            error
+                                        );
+                                    }
+                                }
                             }
                             WhatsAppCommand::Disconnect => {
                                 break;
@@ -373,4 +544,106 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         }
     })
+}
+
+fn parse_message_content(message: &waproto::whatsapp::Message) -> MessageContent {
+    if let Some(text) = message.conversation.as_ref() {
+        return MessageContent::Text(text.clone());
+    }
+
+    if let Some(extended) = message.extended_text_message.as_ref() {
+        if let Some(text) = extended.text.as_ref().filter(|s| !s.trim().is_empty()) {
+            return MessageContent::Text(text.clone());
+        }
+        if let Some(description) = extended.description.as_ref().filter(|s| !s.trim().is_empty()) {
+            return MessageContent::Text(description.clone());
+        }
+    }
+
+    if let Some(image) = message.image_message.as_ref() {
+        return MessageContent::Image {
+            caption: image.caption.clone(),
+            url: image.url.clone(),
+            thumbnail: image.jpeg_thumbnail.clone(),
+        };
+    }
+
+    if let Some(video) = message.video_message.as_ref() {
+        return MessageContent::Video {
+            caption: video.caption.clone(),
+            url: video.url.clone(),
+            thumbnail: video.jpeg_thumbnail.clone(),
+        };
+    }
+
+    if let Some(audio) = message.audio_message.as_ref() {
+        return MessageContent::Audio {
+            url: audio.url.clone(),
+            duration_secs: audio.seconds.unwrap_or(0),
+            is_voice_note: audio.ptt.unwrap_or(false),
+        };
+    }
+
+    if let Some(document) = message.document_message.as_ref() {
+        return MessageContent::Document {
+            filename: document.file_name.clone().unwrap_or_else(|| "Document".to_string()),
+            url: document.url.clone(),
+            mime_type: document.mimetype.clone(),
+        };
+    }
+
+    if let Some(sticker) = message.sticker_message.as_ref() {
+        return MessageContent::Sticker {
+            url: sticker.url.clone(),
+        };
+    }
+
+    if let Some(location) = message.location_message.as_ref() {
+        return MessageContent::Location {
+            latitude: location.degrees_latitude.unwrap_or(0.0),
+            longitude: location.degrees_longitude.unwrap_or(0.0),
+            name: location.name.clone(),
+        };
+    }
+
+    if let Some(contact) = message.contact_message.as_ref() {
+        return MessageContent::Contact {
+            display_name: contact.display_name.clone().unwrap_or_else(|| "Contact".to_string()),
+            vcard: contact.vcard.clone().unwrap_or_default(),
+        };
+    }
+
+    if let Some(view_once) = message
+        .view_once_message
+        .as_ref()
+        .and_then(|wrapper| wrapper.message.as_ref())
+    {
+        return parse_message_content(view_once);
+    }
+
+    if let Some(view_once_v2) = message
+        .view_once_message_v2
+        .as_ref()
+        .and_then(|wrapper| wrapper.message.as_ref())
+    {
+        return parse_message_content(view_once_v2);
+    }
+
+    if let Some(ephemeral) = message
+        .ephemeral_message
+        .as_ref()
+        .and_then(|wrapper| wrapper.message.as_ref())
+    {
+        return parse_message_content(ephemeral);
+    }
+
+    if let Some(edited) = message
+        .edited_message
+        .as_ref()
+        .and_then(|wrapper| wrapper.message.as_ref())
+    {
+        return parse_message_content(edited);
+    }
+
+    MessageContent::Unknown
 }
