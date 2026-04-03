@@ -1,12 +1,13 @@
-//! Chat view component
+//! Chat view component - displays messages and input area
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
-use crate::core::types::{ChatMessage, Message};
-use crate::whatsapp::{MessageStatus, TypingState};
+use crate::controller::Message;
+use crate::model::{ChatMessage, MessageStatus};
+use crate::whatsapp::TypingState;
 
-/// Render the chat view
-pub fn view<'a>(
+/// Render the chat view with messages and input
+pub fn chat_view<'a>(
     chat_name: &'a str,
     messages: &'a [ChatMessage],
     input_value: &'a str,
@@ -17,9 +18,8 @@ pub fn view<'a>(
         row![
             text(chat_name).size(18),
             Space::new().width(Length::Fill),
-            // Online status could go here
         ]
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center),
     )
     .padding(15)
     .width(Length::Fill)
@@ -29,11 +29,11 @@ pub fn view<'a>(
         style
     });
 
-    // Messages
+    // Messages list
     let mut message_list = column![].spacing(8).padding(15);
 
     for msg in messages {
-        let is_me = msg.is_me;
+        let is_me = msg.is_from_me;
 
         // Status indicator for sent messages
         let status_text = if is_me {
@@ -86,15 +86,11 @@ pub fn view<'a>(
         if !typing_text.is_empty() {
             message_list = message_list.push(
                 container(
-                    text(typing_text)
-                        .size(13)
-                        .style(|theme: &iced::Theme| {
-                            text::Style {
-                                color: Some(theme.palette().background.strongest.color),
-                            }
-                        })
+                    text(typing_text).size(13).style(|theme: &iced::Theme| text::Style {
+                        color: Some(theme.palette().background.strongest.color),
+                    }),
                 )
-                .padding(8)
+                .padding(8),
             );
         }
     }
@@ -118,15 +114,18 @@ pub fn view<'a>(
                     style
                 }),
             button(
-                iced::widget::svg(iced::widget::svg::Handle::from_memory(format!(
-                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
-                    icondata::LuSend.data
-                ).into_bytes()))
+                iced::widget::svg(iced::widget::svg::Handle::from_memory(
+                    format!(
+                        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
+                        icondata::LuSend.data
+                    )
+                    .into_bytes(),
+                ))
                 .width(Length::Fixed(18.0))
                 .height(Length::Fixed(18.0))
                 .style(|_theme: &iced::Theme, _status| iced::widget::svg::Style {
                     color: Some(iced::Color::WHITE),
-                })
+                }),
             )
             .on_press(Message::SendMessage)
             .padding(12)
@@ -140,7 +139,7 @@ pub fn view<'a>(
             })
         ]
         .spacing(10)
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center),
     )
     .padding(15)
     .width(Length::Fill)
@@ -164,7 +163,7 @@ pub fn empty_view<'a>() -> Element<'a, Message> {
             text("Select a chat to start messaging").size(18),
         ]
         .align_x(Alignment::Center)
-        .spacing(10)
+        .spacing(10),
     )
     .width(Length::Fill)
     .height(Length::Fill)

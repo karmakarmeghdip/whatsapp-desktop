@@ -1,9 +1,10 @@
 mod app;
-mod core;
-mod ui;
+mod controller;
+mod model;
+mod view;
 mod whatsapp;
 
-use app::WhatsApp;
+use app::App;
 
 pub fn main() -> iced::Result {
     // Initialize logging
@@ -22,9 +23,9 @@ pub fn main() -> iced::Result {
 
     log::info!("Starting WhatsApp Desktop");
 
-    iced::application(WhatsApp::new, WhatsApp::update, WhatsApp::view)
-        .title(WhatsApp::title)
-        .theme(WhatsApp::theme)
-        .subscription(WhatsApp::subscription)
+    iced::application(App::new, App::update, App::view)
+        .title(App::title)
+        .theme(App::theme)
+        .subscription(App::subscription)
         .run()
 }
