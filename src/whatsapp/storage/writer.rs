@@ -88,15 +88,7 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                 chat,
                 raw_conversation,
             } => {
-                // Log what we're trying to persist
-                log::debug!(
-                    "Persisting chat: jid={}, name='{}', is_group={}",
-                    chat.jid.0,
-                    chat.name,
-                    chat.is_group
-                );
-                
-                let result = tx.execute(
+                let _ = tx.execute(
                     "
                     INSERT INTO app_chats (
                         jid, name, last_message, last_activity_ms,
@@ -104,12 +96,7 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                         raw_conversation, updated_at_ms
                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                     ON CONFLICT(jid) DO UPDATE SET
-                        name=CASE 
-                            WHEN excluded.name = '' THEN app_chats.name
-                            WHEN excluded.name = excluded.jid THEN app_chats.name
-                            WHEN SUBSTR(excluded.jid, 1, LENGTH(excluded.name)) = excluded.name AND excluded.jid LIKE excluded.name || '@%' THEN app_chats.name
-                            ELSE excluded.name 
-                        END,
+                        name=excluded.name,
                         last_message=excluded.last_message,
                         last_activity_ms=excluded.last_activity_ms,
                         is_group=excluded.is_group,
@@ -133,12 +120,6 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                         Utc::now().timestamp_millis()
                     ],
                 );
-                
-                if let Err(e) = result {
-                    log::error!("Failed to persist chat {}: {}", chat.jid.0, e);
-                } else {
-                    log::debug!("Successfully persisted chat {}", chat.jid.0);
-                }
             }
             StorageCommand::UpsertMessage(message) => {
                 let _ = tx.execute(

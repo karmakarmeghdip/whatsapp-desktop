@@ -112,31 +112,10 @@ fn load_chats(conn: &Connection, contact_map: &HashMap<String, String>) -> Vec<C
         })
     }) {
         Ok(rows) => rows,
-        Err(e) => {
-            log::error!("Failed to execute query: {}", e);
-            return Vec::new();
-        }
+        Err(_) => return Vec::new(),
     };
 
-    let mut chats = Vec::new();
-    let mut error_count = 0;
-    for (i, row) in rows.enumerate() {
-        match row {
-            Ok(chat) => chats.push(chat),
-            Err(e) => {
-                error_count += 1;
-                if error_count <= 5 {
-                    log::error!("Failed to parse row {}: {}", i, e);
-                }
-            }
-        }
-    }
-    
-    if error_count > 0 {
-        log::error!("Total parse errors: {}", error_count);
-    }
-    
-    chats
+    rows.filter_map(Result::ok).collect()
 }
 
 /// Load recent messages from the database
