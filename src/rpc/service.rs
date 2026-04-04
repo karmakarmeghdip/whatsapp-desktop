@@ -3,15 +3,15 @@
 //! This module runs the actual WhatsApp service and translates
 //! between RPC types and internal whatsapp types.
 
-use std::sync::Arc;
-use futures::channel::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
 use super::{RpcNotification, RpcRequest};
-use crate::whatsapp::{self, WhatsAppEvent, WhatsAppCommand};
 use crate::whatsapp::storage::{self, StoredMessage};
-use wacore::types::events::Event;
+use crate::whatsapp::{self, WhatsAppCommand, WhatsAppEvent};
 use chrono::{DateTime, Utc};
+use futures::channel::mpsc;
 use prost::Message as _;
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
+use wacore::types::events::Event;
 
 /// Run the RPC service that handles requests and sends notifications
 pub async fn run_rpc_service(
@@ -22,10 +22,10 @@ pub async fn run_rpc_service(
 
     // Channel for events from whatsapp service
     let (wa_event_tx, mut wa_event_rx) = tokio::sync::mpsc::unbounded_channel::<WhatsAppEvent>();
-    
+
     // Channel for commands to whatsapp service
     let (wa_cmd_tx, wa_cmd_rx) = mpsc::channel::<WhatsAppCommand>(100);
-    
+
     // Store connection handle for sending commands
     let mut whatsapp_connection: Option<whatsapp::Connection> = None;
 
@@ -45,7 +45,7 @@ pub async fn run_rpc_service(
                 if let WhatsAppEvent::Connected(conn) = &event {
                     whatsapp_connection = Some(conn.clone());
                 }
-                
+
                 if let Some(notification) = convert_event_to_notification(event) {
                     if notification_tx.send(notification).is_err() {
                         log::error!("Failed to send notification - channel closed");
@@ -70,17 +70,17 @@ async fn run_whatsapp_connection(
     event_tx: tokio::sync::mpsc::UnboundedSender<WhatsAppEvent>,
     _command_rx: mpsc::Receiver<WhatsAppCommand>,
 ) {
-    use whatsapp_rust::bot::Bot;
+    use futures::StreamExt;
     use whatsapp_rust::TokioRuntime;
+    use whatsapp_rust::bot::Bot;
     use whatsapp_rust::store::SqliteStore;
     use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
     use whatsapp_rust_ureq_http_client::UreqHttpClient;
-    use futures::StreamExt;
 
     loop {
         // Send connecting event
         let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-            whatsapp::ConnectionState::Connecting
+            whatsapp::ConnectionState::Connecting,
         ));
 
         // Initialize storage backend
@@ -93,7 +93,10 @@ async fn run_whatsapp_connection(
         if let Some(parent) = db_path.parent() {
             if let Err(e) = tokio::fs::create_dir_all(parent).await {
                 log::error!("Failed to create data directory: {}", e);
-                let _ = event_tx.send(WhatsAppEvent::Error(format!("Failed to create data directory: {}", e)));
+                let _ = event_tx.send(WhatsAppEvent::Error(format!(
+                    "Failed to create data directory: {}",
+                    e
+                )));
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
                 continue;
             }
@@ -106,12 +109,12 @@ async fn run_whatsapp_connection(
 
         // Load stored chats and messages
         let (stored_chats, stored_messages) = storage::load_snapshot(&db_path);
-        
+
         // Send stored chats to UI
         for chat in stored_chats {
             let _ = event_tx.send(WhatsAppEvent::ChatUpdated(chat));
         }
-        
+
         // Send stored messages to UI
         for stored in stored_messages {
             if let Ok(raw) = waproto::whatsapp::Message::decode(stored.raw_message.as_slice()) {
@@ -136,16 +139,20 @@ async fn run_whatsapp_connection(
             Ok(store) => Arc::new(store),
             Err(e) => {
                 log::error!("Failed to initialize storage: {}", e);
-                let _ = event_tx.send(WhatsAppEvent::Error(format!("Failed to initialize storage: {}", e)));
+                let _ = event_tx.send(WhatsAppEvent::Error(format!(
+                    "Failed to initialize storage: {}",
+                    e
+                )));
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
                 continue;
             }
         };
 
         // Create channels
-        let (internal_event_tx, mut internal_event_rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
+        let (internal_event_tx, mut internal_event_rx) =
+            tokio::sync::mpsc::unbounded_channel::<Event>();
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<WhatsAppCommand>(100);
-        
+
         // Create the connection handle
         let connection = whatsapp::Connection(cmd_tx.clone());
 
@@ -208,12 +215,12 @@ async fn run_whatsapp_connection(
                 Some(event) = internal_event_rx.recv() => {
                     handle_internal_event(event, &connection, &event_tx, &storage_writer, &mut sync_current, &mut sync_total_hint).await;
                 }
-                
+
                 Some(command) = cmd_rx.next() => {
                     // Handle commands inline since client is not Send in a separate function
                     use wacore_binary::jid::Jid as WaJid;
                     use whatsapp_rust::ChatStateType;
-                    
+
                     match command {
                         WhatsAppCommand::SendMessage { local_id, chat_jid, text } => {
                             let jid_str = chat_jid.0.clone();
@@ -223,7 +230,7 @@ async fn run_whatsapp_connection(
                                     conversation: Some(text),
                                     ..Default::default()
                                 };
-                                
+
                                 match client.send_message(wa_jid, message).await {
                                     Ok(message_id) => {
                                         log::info!("Message sent: {} -> {}", local_id, message_id);
@@ -256,18 +263,12 @@ async fn run_whatsapp_connection(
                                 let _ = client.chatstate().send(&wa_jid, state).await;
                             }
                         }
-                        WhatsAppCommand::MarkAsRead { .. } => {
+                        WhatsAppCommand::MarkAsRead => {
                             // TODO: Implement mark as read
-                        }
-                        WhatsAppCommand::FetchHistory { .. } => {
-                            // TODO: Implement fetch history
-                        }
-                        WhatsAppCommand::Disconnect => {
-                            // TODO: Implement disconnect
                         }
                     }
                 }
-                
+
                 _ = &mut bot_task => {
                     log::warn!("Bot task ended");
                     break;
@@ -290,48 +291,48 @@ async fn handle_internal_event(
     sync_total_hint: &mut Option<u32>,
 ) {
     use wacore::types::presence::{
-        ChatPresence as WaChatPresence,
-        ChatPresenceMedia as WaChatPresenceMedia,
-        ReceiptType,
+        ChatPresence as WaChatPresence, ChatPresenceMedia as WaChatPresenceMedia, ReceiptType,
     };
 
     match event {
         Event::PairingQrCode { code, .. } => {
             log::info!("QR code received for pairing");
-            let _ = event_tx.send(WhatsAppEvent::QrCodeReceived { qr_code: code.clone() });
+            let _ = event_tx.send(WhatsAppEvent::QrCodeReceived {
+                qr_code: code.clone(),
+            });
             let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-                whatsapp::ConnectionState::WaitingForQr { qr_code: code }
+                whatsapp::ConnectionState::WaitingForQr { qr_code: code },
             ));
         }
         Event::PairingCode { code, .. } => {
             log::info!("Pair code received: {}", code);
             let _ = event_tx.send(WhatsAppEvent::PairCodeReceived { code: code.clone() });
             let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-                whatsapp::ConnectionState::WaitingForPairCode { code }
+                whatsapp::ConnectionState::WaitingForPairCode { code },
             ));
         }
         Event::Connected(_) => {
             log::info!("Connected to WhatsApp");
             let _ = event_tx.send(WhatsAppEvent::Connected(connection.clone()));
             let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-                whatsapp::ConnectionState::Connected
+                whatsapp::ConnectionState::Connected,
             ));
         }
         Event::Disconnected(_) => {
             log::warn!("Disconnected from WhatsApp");
             let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-                whatsapp::ConnectionState::Reconnecting
+                whatsapp::ConnectionState::Reconnecting,
             ));
         }
         Event::LoggedOut(_) => {
             log::warn!("Logged out from WhatsApp");
             let _ = event_tx.send(WhatsAppEvent::ConnectionStateChanged(
-                whatsapp::ConnectionState::LoggedOut
+                whatsapp::ConnectionState::LoggedOut,
             ));
         }
         Event::Message(msg, info) => {
             let content = parse_message_content(msg.as_ref());
-            
+
             let chat_msg = whatsapp::ChatMessage {
                 id: info.id.clone(),
                 sender: whatsapp::Jid::new(info.source.sender.to_string()),
@@ -356,10 +357,8 @@ async fn handle_internal_event(
 
             // Update contact name if provided
             if !info.push_name.is_empty() {
-                storage_writer.persist_contact_name(
-                    info.source.sender.to_string(),
-                    info.push_name.clone(),
-                );
+                storage_writer
+                    .persist_contact_name(info.source.sender.to_string(), info.push_name.clone());
                 let _ = event_tx.send(WhatsAppEvent::ContactNameUpdated {
                     jid: whatsapp::Jid::new(info.source.sender.to_string()),
                     name: info.push_name,
@@ -374,7 +373,7 @@ async fn handle_internal_event(
                 ReceiptType::Delivered => whatsapp::MessageStatus::Delivered,
                 _ => whatsapp::MessageStatus::Sent,
             };
-            
+
             for msg_id in receipt.message_ids {
                 let _ = event_tx.send(WhatsAppEvent::MessageStatusUpdated {
                     message_id: msg_id.clone(),
@@ -385,11 +384,13 @@ async fn handle_internal_event(
         }
         Event::ChatPresence(update) => {
             let state = match (update.state, update.media) {
-                (WaChatPresence::Composing, WaChatPresenceMedia::Audio) => whatsapp::TypingState::Recording,
+                (WaChatPresence::Composing, WaChatPresenceMedia::Audio) => {
+                    whatsapp::TypingState::Recording
+                }
                 (WaChatPresence::Composing, _) => whatsapp::TypingState::Typing,
                 (WaChatPresence::Paused, _) => whatsapp::TypingState::Idle,
             };
-            
+
             let _ = event_tx.send(WhatsAppEvent::TypingIndicator {
                 chat_jid: whatsapp::Jid::new(update.source.chat.to_string()),
                 sender_jid: whatsapp::Jid::new(update.source.sender.to_string()),
@@ -425,7 +426,11 @@ async fn handle_internal_event(
                         .clone()
                         .or_else(|| conv.name.clone())
                         .or_else(|| conv.username.clone())
-                        .or_else(|| conv.pn_jid.as_ref().map(|jid| whatsapp::Jid::new(jid.clone()).display_label()))
+                        .or_else(|| {
+                            conv.pn_jid
+                                .as_ref()
+                                .map(|jid| whatsapp::Jid::new(jid.clone()).display_label())
+                        })
                         .unwrap_or_else(|| whatsapp::Jid::new(id.clone()).display_label());
 
                     let last_activity = conv
@@ -452,16 +457,24 @@ async fn handle_internal_event(
                     if let Some(full_conv) = lazy_conv.get_with_messages() {
                         let total_messages = full_conv.messages.len();
                         for (idx, item) in full_conv.messages.into_iter().enumerate() {
-                            let Some(web) = item.message else { continue; };
-                            let Some(message) = web.message else { continue; };
+                            let Some(web) = item.message else {
+                                continue;
+                            };
+                            let Some(message) = web.message else {
+                                continue;
+                            };
 
                             let chat_jid = web.key.remote_jid.clone().unwrap_or_else(|| id.clone());
-                            let sender_jid = web.key.participant.clone()
+                            let sender_jid = web
+                                .key
+                                .participant
+                                .clone()
                                 .or_else(|| web.key.remote_jid.clone())
                                 .unwrap_or_else(|| chat_jid.clone());
 
                             let content = parse_message_content(&message);
-                            let timestamp = web.message_timestamp
+                            let timestamp = web
+                                .message_timestamp
                                 .and_then(|ts| DateTime::<Utc>::from_timestamp(ts as i64, 0))
                                 .unwrap_or_else(Utc::now);
 
@@ -506,7 +519,10 @@ async fn handle_internal_event(
             }
         }
         Event::ContactUpdate(update) => {
-            let name = update.action.full_name.clone()
+            let name = update
+                .action
+                .full_name
+                .clone()
                 .or(update.action.first_name.clone());
 
             if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
@@ -535,10 +551,8 @@ async fn handle_internal_event(
         }
         Event::PushNameUpdate(update) => {
             if !update.new_push_name.trim().is_empty() {
-                storage_writer.persist_contact_name(
-                    update.jid.to_string(),
-                    update.new_push_name.clone(),
-                );
+                storage_writer
+                    .persist_contact_name(update.jid.to_string(), update.new_push_name.clone());
                 let _ = event_tx.send(WhatsAppEvent::ContactNameUpdated {
                     jid: whatsapp::Jid::new(update.jid.to_string()),
                     name: update.new_push_name,
@@ -547,11 +561,11 @@ async fn handle_internal_event(
         }
         Event::GroupUpdate(update) => {
             use wacore::stanza::groups::GroupNotificationAction;
-            
+
             if let GroupNotificationAction::Subject { subject, .. } = &update.action {
                 if !subject.trim().is_empty() {
                     let group_jid = whatsapp::Jid::new(update.group_jid.to_string());
-                    
+
                     let chat = whatsapp::Chat {
                         jid: group_jid.clone(),
                         name: subject.clone(),
@@ -562,7 +576,7 @@ async fn handle_internal_event(
                         is_muted: false,
                         is_pinned: false,
                     };
-                    
+
                     storage_writer.persist_chat(chat.clone(), None);
                     let _ = event_tx.send(WhatsAppEvent::ChatUpdated(chat));
                 }
@@ -583,7 +597,11 @@ fn parse_message_content(message: &waproto::whatsapp::Message) -> whatsapp::Mess
         if let Some(text) = extended.text.as_ref().filter(|s| !s.trim().is_empty()) {
             return whatsapp::MessageContent::Text(text.clone());
         }
-        if let Some(description) = extended.description.as_ref().filter(|s| !s.trim().is_empty()) {
+        if let Some(description) = extended
+            .description
+            .as_ref()
+            .filter(|s| !s.trim().is_empty())
+        {
             return whatsapp::MessageContent::Text(description.clone());
         }
     }
@@ -614,7 +632,10 @@ fn parse_message_content(message: &waproto::whatsapp::Message) -> whatsapp::Mess
 
     if let Some(document) = message.document_message.as_ref() {
         return whatsapp::MessageContent::Document {
-            filename: document.file_name.clone().unwrap_or_else(|| "Document".to_string()),
+            filename: document
+                .file_name
+                .clone()
+                .unwrap_or_else(|| "Document".to_string()),
             url: document.url.clone(),
             mime_type: document.mimetype.clone(),
         };
@@ -636,7 +657,10 @@ fn parse_message_content(message: &waproto::whatsapp::Message) -> whatsapp::Mess
 
     if let Some(contact) = message.contact_message.as_ref() {
         return whatsapp::MessageContent::Contact {
-            display_name: contact.display_name.clone().unwrap_or_else(|| "Contact".to_string()),
+            display_name: contact
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "Contact".to_string()),
             vcard: contact.vcard.clone().unwrap_or_default(),
         };
     }
@@ -722,18 +746,21 @@ async fn handle_request(
 fn convert_event_to_notification(event: WhatsAppEvent) -> Option<RpcNotification> {
     match event {
         // ServiceReady is emitted directly, not converted from WhatsAppEvent
-        WhatsAppEvent::ConnectionStateChanged(state) => {
-            Some(RpcNotification::ConnectionStateChanged(convert_connection_state(state)))
-        }
+        WhatsAppEvent::ConnectionStateChanged(state) => Some(
+            RpcNotification::ConnectionStateChanged(convert_connection_state(state)),
+        ),
         WhatsAppEvent::QrCodeReceived { qr_code } => {
             Some(RpcNotification::QrCodeReceived { qr_code })
         }
         WhatsAppEvent::PairCodeReceived { code } => {
             Some(RpcNotification::PairCodeReceived { code })
         }
-        WhatsAppEvent::Connected(_) => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::Connected)),
-        WhatsAppEvent::Disconnected => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::Reconnecting)),
-        WhatsAppEvent::LoggedOut => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::LoggedOut)),
+        WhatsAppEvent::Connected(_) => Some(RpcNotification::ConnectionStateChanged(
+            super::ConnectionState::Connected,
+        )),
+        WhatsAppEvent::Disconnected => Some(RpcNotification::ConnectionStateChanged(
+            super::ConnectionState::Reconnecting,
+        )),
         WhatsAppEvent::MessageReceived(msg) => {
             Some(RpcNotification::MessageReceived(convert_chat_message(msg)))
         }
@@ -764,14 +791,13 @@ fn convert_event_to_notification(event: WhatsAppEvent) -> Option<RpcNotification
             chat_jid: convert_jid(chat_jid),
             status: convert_message_status(status),
         }),
-        WhatsAppEvent::ChatsUpdated(chats) => {
-            Some(RpcNotification::ChatsUpdated(chats.into_iter().map(convert_chat).collect()))
-        }
         WhatsAppEvent::ChatUpdated(chat) => Some(RpcNotification::ChatUpdated(convert_chat(chat))),
-        WhatsAppEvent::ContactNameUpdated { jid, name } => Some(RpcNotification::ContactNameUpdated {
-            jid: convert_jid(jid),
-            name,
-        }),
+        WhatsAppEvent::ContactNameUpdated { jid, name } => {
+            Some(RpcNotification::ContactNameUpdated {
+                jid: convert_jid(jid),
+                name,
+            })
+        }
         WhatsAppEvent::TypingIndicator {
             chat_jid,
             sender_jid,
@@ -798,7 +824,6 @@ fn convert_jid(jid: whatsapp::Jid) -> super::Jid {
 
 fn convert_connection_state(state: whatsapp::ConnectionState) -> super::ConnectionState {
     match state {
-        whatsapp::ConnectionState::Disconnected => super::ConnectionState::Disconnected,
         whatsapp::ConnectionState::Connecting => super::ConnectionState::Connecting,
         whatsapp::ConnectionState::WaitingForQr { qr_code } => {
             super::ConnectionState::WaitingForQr { qr_code }
@@ -839,7 +864,9 @@ fn convert_chat_message(msg: whatsapp::ChatMessage) -> super::ChatMessage {
         timestamp: msg.timestamp,
         is_from_me: msg.is_from_me,
         status: convert_message_status(msg.status),
-        quoted_message: msg.quoted_message.map(|q| Box::new(convert_chat_message(*q))),
+        quoted_message: msg
+            .quoted_message
+            .map(|q| Box::new(convert_chat_message(*q))),
     }
 }
 
@@ -901,7 +928,6 @@ fn convert_message_content(content: whatsapp::MessageContent) -> super::MessageC
             display_name,
             vcard,
         },
-        WaContent::System(text) => super::MessageContent::System(text),
         WaContent::Unknown => super::MessageContent::Unknown,
     }
 }

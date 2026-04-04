@@ -11,10 +11,6 @@ use serde::{Deserialize, Serialize};
 pub struct Jid(pub String);
 
 impl Jid {
-    pub fn new(jid: impl Into<String>) -> Self {
-        Self(jid.into())
-    }
-
     pub fn user(&self) -> &str {
         self.0.split('@').next().unwrap_or(&self.0)
     }
@@ -25,10 +21,6 @@ impl Jid {
 
     pub fn display_label(&self) -> String {
         self.normalized_user()
-    }
-
-    pub fn is_group(&self) -> bool {
-        self.0.contains("@g.us")
     }
 }
 
@@ -63,22 +55,7 @@ pub struct Chat {
     pub is_pinned: bool,
 }
 
-impl Chat {
-    pub fn new(jid: impl Into<Jid>, name: impl Into<String>) -> Self {
-        let jid = jid.into();
-        let is_group = jid.is_group();
-        Self {
-            jid,
-            name: name.into(),
-            last_message: None,
-            last_activity: None,
-            is_group,
-            unread_count: 0,
-            is_muted: false,
-            is_pinned: false,
-        }
-    }
-}
+
 
 /// A message in a chat
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,21 +173,7 @@ pub enum ConnectionState {
     LoggedOut,
 }
 
-impl ConnectionState {
-    pub fn is_connected(&self) -> bool {
-        matches!(self, ConnectionState::Connected)
-    }
 
-    pub fn needs_pairing(&self) -> bool {
-        matches!(
-            self,
-            ConnectionState::Disconnected
-                | ConnectionState::WaitingForQr { .. }
-                | ConnectionState::WaitingForPairCode { .. }
-                | ConnectionState::LoggedOut
-        )
-    }
-}
 
 /// Typing indicator state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

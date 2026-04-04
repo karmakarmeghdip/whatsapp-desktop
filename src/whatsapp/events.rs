@@ -10,23 +10,16 @@ pub enum WhatsAppEvent {
     ConnectionStateChanged(ConnectionState),
 
     /// QR code received for pairing
-    QrCodeReceived {
-        qr_code: String,
-    },
+    QrCodeReceived { qr_code: String },
 
     /// Pair code received (alternative to QR)
-    PairCodeReceived {
-        code: String,
-    },
+    PairCodeReceived { code: String },
 
     /// Successfully paired and connected (includes connection handle for sending)
     Connected(Connection),
 
     /// Disconnected from WhatsApp
     Disconnected,
-
-    /// Logged out (session invalidated)
-    LoggedOut,
 
     /// New message received
     MessageReceived(ChatMessage),
@@ -52,17 +45,11 @@ pub enum WhatsAppEvent {
         status: MessageStatus,
     },
 
-    /// Chat list updated
-    ChatsUpdated(Vec<Chat>),
-
     /// Single chat updated
     ChatUpdated(Chat),
 
     /// Contact name metadata updated
-    ContactNameUpdated {
-        jid: Jid,
-        name: String,
-    },
+    ContactNameUpdated { jid: Jid, name: String },
 
     /// Typing indicator received
     TypingIndicator {
@@ -75,10 +62,7 @@ pub enum WhatsAppEvent {
     PresenceUpdated(Presence),
 
     /// History sync progress
-    HistorySyncProgress {
-        current: u32,
-        total: u32,
-    },
+    HistorySyncProgress { current: u32, total: u32 },
 
     /// History sync completed
     HistorySyncCompleted,

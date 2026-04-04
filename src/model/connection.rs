@@ -31,20 +31,7 @@ impl Default for ConnectionState {
     }
 }
 
-impl ConnectionState {
-    /// Check if currently connected
-    pub fn is_connected(&self) -> bool {
-        matches!(self, Self::Connected)
-    }
 
-    /// Check if needs user action to pair
-    pub fn needs_pairing(&self) -> bool {
-        matches!(
-            self,
-            Self::WaitingForQr { .. } | Self::WaitingForPairCode { .. } | Self::LoggedOut
-        )
-    }
-}
 
 /// Which view should be displayed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,6 +43,4 @@ pub enum ViewState {
     Pairing,
     /// Main chat list and conversation view
     Chats,
-    /// Settings screen
-    Settings,
 }

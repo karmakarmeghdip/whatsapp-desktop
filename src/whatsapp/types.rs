@@ -18,17 +18,16 @@ impl Jid {
 
     /// Extract user part without device suffix (e.g. `12345:12` -> `12345`)
     pub fn normalized_user(&self) -> String {
-        self.user().split(':').next().unwrap_or(self.user()).to_string()
+        self.user()
+            .split(':')
+            .next()
+            .unwrap_or(self.user())
+            .to_string()
     }
 
     /// Best effort display label for a JID
     pub fn display_label(&self) -> String {
         self.normalized_user()
-    }
-
-    /// Check if this is a group JID
-    pub fn is_group(&self) -> bool {
-        self.0.contains("@g.us")
     }
 }
 
@@ -69,23 +68,6 @@ pub struct Chat {
     pub is_muted: bool,
     /// Whether the chat is pinned
     pub is_pinned: bool,
-}
-
-impl Chat {
-    pub fn new(jid: impl Into<Jid>, name: impl Into<String>) -> Self {
-        let jid = jid.into();
-        let is_group = jid.is_group();
-        Self {
-            jid,
-            name: name.into(),
-            last_message: None,
-            last_activity: None,
-            is_group,
-            unread_count: 0,
-            is_muted: false,
-            is_pinned: false,
-        }
-    }
 }
 
 /// A message in a chat
@@ -141,9 +123,7 @@ pub enum MessageContent {
         mime_type: Option<String>,
     },
     /// Sticker
-    Sticker {
-        url: Option<String>,
-    },
+    Sticker { url: Option<String> },
     /// Location
     Location {
         latitude: f64,
@@ -151,56 +131,9 @@ pub enum MessageContent {
         name: Option<String>,
     },
     /// Contact card
-    Contact {
-        display_name: String,
-        vcard: String,
-    },
-    /// System message (e.g., "X added Y to the group")
-    System(String),
+    Contact { display_name: String, vcard: String },
     /// Unknown/unsupported message type
     Unknown,
-}
-
-impl MessageContent {
-    /// Get a preview string for the message content
-    pub fn preview(&self) -> String {
-        match self {
-            MessageContent::Text(text) => {
-                let char_count = text.chars().count();
-                if char_count > 50 {
-                    let truncated: String = text.chars().take(47).collect();
-                    format!("{}...", truncated)
-                } else {
-                    text.clone()
-                }
-            }
-            MessageContent::Image { caption, .. } => {
-                caption.clone().unwrap_or_else(|| "📷 Photo".to_string())
-            }
-            MessageContent::Video { caption, .. } => {
-                caption.clone().unwrap_or_else(|| "🎥 Video".to_string())
-            }
-            MessageContent::Audio { is_voice_note, .. } => {
-                if *is_voice_note {
-                    "🎤 Voice message".to_string()
-                } else {
-                    "🎵 Audio".to_string()
-                }
-            }
-            MessageContent::Document { filename, .. } => {
-                format!("📄 {}", filename)
-            }
-            MessageContent::Sticker { .. } => "🎭 Sticker".to_string(),
-            MessageContent::Location { name, .. } => {
-                name.clone().unwrap_or_else(|| "📍 Location".to_string())
-            }
-            MessageContent::Contact { display_name, .. } => {
-                format!("👤 {}", display_name)
-            }
-            MessageContent::System(text) => text.clone(),
-            MessageContent::Unknown => "Unsupported message".to_string(),
-        }
-    }
 }
 
 /// Message delivery/read status
@@ -221,8 +154,6 @@ pub enum MessageStatus {
 /// Connection state of the WhatsApp client
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionState {
-    /// Not connected, need to pair
-    Disconnected,
     /// Connecting to WhatsApp servers
     Connecting,
     /// Waiting for QR code scan
@@ -235,22 +166,6 @@ pub enum ConnectionState {
     Reconnecting,
     /// Logged out (need to re-pair)
     LoggedOut,
-}
-
-impl ConnectionState {
-    pub fn is_connected(&self) -> bool {
-        matches!(self, ConnectionState::Connected)
-    }
-
-    pub fn needs_pairing(&self) -> bool {
-        matches!(
-            self,
-            ConnectionState::Disconnected
-                | ConnectionState::WaitingForQr { .. }
-                | ConnectionState::WaitingForPairCode { .. }
-                | ConnectionState::LoggedOut
-        )
-    }
 }
 
 /// Typing indicator state

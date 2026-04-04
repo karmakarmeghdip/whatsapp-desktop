@@ -18,48 +18,6 @@ impl RpcClientHandle {
     pub fn send(&mut self, request: RpcRequest) {
         let _ = self.sender.try_send(request);
     }
-
-    /// Send a text message
-    pub fn send_message(&mut self, chat_jid: super::Jid, text: String) {
-        self.send(RpcRequest::SendMessage {
-            local_id: format!("manual_{}", chrono::Utc::now().timestamp_millis()),
-            chat_jid,
-            text,
-        });
-    }
-
-    /// Send typing indicator
-    pub fn send_typing(&mut self, chat_jid: super::Jid, typing: bool) {
-        self.send(RpcRequest::SendTyping { chat_jid, typing });
-    }
-
-    /// Mark a chat as read
-    pub fn mark_as_read(&mut self, chat_jid: super::Jid) {
-        self.send(RpcRequest::MarkAsRead { chat_jid });
-    }
-
-    /// Fetch older message history
-    pub fn fetch_history(
-        &mut self,
-        chat_jid: super::Jid,
-        oldest_msg_id: String,
-        oldest_msg_from_me: bool,
-        oldest_msg_timestamp_ms: i64,
-        count: i32,
-    ) {
-        self.send(RpcRequest::FetchHistory {
-            chat_jid,
-            oldest_msg_id,
-            oldest_msg_from_me,
-            oldest_msg_timestamp_ms,
-            count,
-        });
-    }
-
-    /// Disconnect from WhatsApp
-    pub fn disconnect(&mut self) {
-        self.send(RpcRequest::Disconnect);
-    }
 }
 
 /// RPC Client that creates the subscription for receiving notifications

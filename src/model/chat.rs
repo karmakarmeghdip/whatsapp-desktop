@@ -62,13 +62,6 @@ pub struct ChatMessage {
 }
 
 impl ChatMessage {
-    pub fn new_outgoing(content: String) -> Self {
-        Self::new_outgoing_with_id(
-            format!("pending_{}", Utc::now().timestamp_millis()),
-            content,
-        )
-    }
-
     pub fn new_outgoing_with_id(id: String, content: String) -> Self {
         Self {
             id,

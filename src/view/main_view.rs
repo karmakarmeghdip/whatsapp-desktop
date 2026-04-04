@@ -4,14 +4,13 @@ use iced::widget::row;
 use iced::Element;
 use crate::controller::Message;
 use crate::model::{AppState, ViewState};
-use super::{loading, pairing, settings, sidebar, chat};
+use super::{loading, pairing, sidebar, chat};
 
 /// Render the appropriate view based on application state
 pub fn render(state: &AppState) -> Element<'_, Message> {
     match state.view {
         ViewState::Loading => loading::loading(),
         ViewState::Pairing => pairing::pairing(state.qr_code_data.as_ref()),
-        ViewState::Settings => settings::settings(),
         ViewState::Chats => chats_view(state),
     }
 }

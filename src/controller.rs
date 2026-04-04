@@ -6,7 +6,7 @@
 
 use iced::Task;
 use iced::widget::{operation, scrollable};
-use crate::model::{AppState, ConnectionState, MessageStatus, ViewState};
+use crate::model::{AppState, ConnectionState, MessageStatus};
 use crate::rpc::{self, RpcNotification, RpcRequest, Jid};
 
 /// Application message enum - all possible events that can update the model
@@ -18,10 +18,6 @@ pub enum Message {
     InputChanged(String),
     /// User pressed send button or Enter
     SendMessage,
-    /// User wants to go to settings
-    ShowSettings,
-    /// User wants to return to chat list
-    BackToChats,
     /// User scrolled message viewport
     MessageListScrolled(scrollable::Viewport),
     /// Internal timer tick for periodic cleanup
@@ -63,16 +59,6 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
                     state.set_error("Not connected to WhatsApp".to_string());
                 }
             }
-            Task::none()
-        }
-
-        Message::ShowSettings => {
-            state.view = ViewState::Settings;
-            Task::none()
-        }
-
-        Message::BackToChats => {
-            state.view = ViewState::Chats;
             Task::none()
         }
 

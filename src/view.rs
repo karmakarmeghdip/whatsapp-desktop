@@ -9,11 +9,9 @@ pub(crate) mod chat;
 mod loading;
 mod main_view;
 mod pairing;
-mod settings;
 mod sidebar;
 
 // Re-export the main render function and components
 pub use main_view::render;
 pub use loading::loading;
 pub use pairing::pairing;
-pub use settings::settings;

@@ -30,7 +30,6 @@ pub struct AppState {
     pub rpc_client: Option<RpcClientHandle>,
     pub view: ViewState,
     pub qr_code: Option<String>,
-    #[allow(dead_code)]
     pub qr_code_data: Option<iced::widget::qr_code::Data>,
     pub error: Option<String>,
     pub sync_in_progress: bool,
@@ -169,10 +168,6 @@ impl AppState {
 
     pub fn set_input(&mut self, value: String) {
         self.input_value = value;
-    }
-
-    pub fn clear_input(&mut self) {
-        self.input_value.clear();
     }
 
     pub fn take_message_to_send(&mut self) -> Option<(Jid, String)> {
@@ -437,9 +432,5 @@ impl AppState {
 
     pub fn set_error(&mut self, error: String) {
         self.error = Some(error);
-    }
-
-    pub fn clear_error(&mut self) {
-        self.error = None;
     }
 }
