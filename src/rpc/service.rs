@@ -420,6 +420,15 @@ async fn handle_internal_event(
                 let id = conv.id.clone();
                 if !id.is_empty() {
                     let jid = whatsapp::Jid::new(id.clone());
+                    
+                    log::info!(
+                        "RPC JoinedGroup: id={}, display_name={:?}, name={:?}, username={:?}",
+                        id,
+                        conv.display_name,
+                        conv.name,
+                        conv.username
+                    );
+                    
                     let name = conv
                         .display_name
                         .clone()
@@ -428,6 +437,8 @@ async fn handle_internal_event(
                         .or_else(|| conv.pn_jid.as_ref().map(|jid| whatsapp::Jid::new(jid.clone()).display_label()))
                         .unwrap_or_else(|| whatsapp::Jid::new(id.clone()).display_label());
 
+                    log::info!("RPC JoinedGroup: final name='{}' for jid={}", name, jid.0);
+
                     let last_activity = conv
                         .conversation_timestamp
                         .or(conv.last_msg_timestamp)
@@ -435,7 +446,7 @@ async fn handle_internal_event(
 
                     let chat = whatsapp::Chat {
                         jid: jid.clone(),
-                        name,
+                        name: name.clone(),
                         last_message: None,
                         last_activity,
                         is_group: id.contains("@g.us"),
@@ -444,8 +455,18 @@ async fn handle_internal_event(
                         is_pinned: conv.pinned.unwrap_or(0) > 0,
                     };
 
-                    let raw_conversation = conv.encode_to_vec();
-                    storage_writer.persist_chat(chat.clone(), Some(raw_conversation));
+                    // Only persist if we have a proper name (not just JID)
+                    let has_proper_name = conv.display_name.is_some() 
+                        || conv.name.is_some() 
+                        || conv.username.is_some();
+                    
+                    if has_proper_name {
+                        let raw_conversation = conv.encode_to_vec();
+                        storage_writer.persist_chat(chat.clone(), Some(raw_conversation));
+                        log::info!("RPC Persisted chat {} with proper name: '{}'", jid.0, name);
+                    } else {
+                        log::warn!("RPC Skipping persist for {} - no proper name available (using: '{}')", jid.0, name);
+                    }
                     let _ = event_tx.send(WhatsAppEvent::ChatUpdated(chat));
 
                     // Process messages if available
@@ -543,6 +564,30 @@ async fn handle_internal_event(
                     jid: whatsapp::Jid::new(update.jid.to_string()),
                     name: update.new_push_name,
                 });
+            }
+        }
+        Event::GroupUpdate(update) => {
+            use wacore::stanza::groups::GroupNotificationAction;
+            
+            if let GroupNotificationAction::Subject { subject, .. } = &update.action {
+                if !subject.trim().is_empty() {
+                    let group_jid = whatsapp::Jid::new(update.group_jid.to_string());
+                    log::info!("RPC Group name updated: {} -> '{}'", group_jid.0, subject);
+                    
+                    let chat = whatsapp::Chat {
+                        jid: group_jid.clone(),
+                        name: subject.clone(),
+                        last_message: None,
+                        last_activity: Some(Utc::now()),
+                        is_group: true,
+                        unread_count: 0,
+                        is_muted: false,
+                        is_pinned: false,
+                    };
+                    
+                    storage_writer.persist_chat(chat.clone(), None);
+                    let _ = event_tx.send(WhatsAppEvent::ChatUpdated(chat));
+                }
             }
         }
         _ => {

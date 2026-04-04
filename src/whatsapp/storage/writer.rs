@@ -88,7 +88,15 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                 chat,
                 raw_conversation,
             } => {
-                let _ = tx.execute(
+                // Log what we're trying to persist
+                log::debug!(
+                    "Persisting chat: jid={}, name='{}', is_group={}",
+                    chat.jid.0,
+                    chat.name,
+                    chat.is_group
+                );
+                
+                let result = tx.execute(
                     "
                     INSERT INTO app_chats (
                         jid, name, last_message, last_activity_ms,
@@ -96,7 +104,12 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                         raw_conversation, updated_at_ms
                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                     ON CONFLICT(jid) DO UPDATE SET
-                        name=excluded.name,
+                        name=CASE 
+                            WHEN excluded.name = '' THEN app_chats.name
+                            WHEN excluded.name = excluded.jid THEN app_chats.name
+                            WHEN SUBSTR(excluded.jid, 1, LENGTH(excluded.name)) = excluded.name AND excluded.jid LIKE excluded.name || '@%' THEN app_chats.name
+                            ELSE excluded.name 
+                        END,
                         last_message=excluded.last_message,
                         last_activity_ms=excluded.last_activity_ms,
                         is_group=excluded.is_group,
@@ -105,19 +118,6 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                         is_pinned=excluded.is_pinned,
                         raw_conversation=COALESCE(excluded.raw_conversation, app_chats.raw_conversation),
                         updated_at_ms=excluded.updated_at_ms
-                    
-                    -- Use conflict resolution for upsert
-                    -- WHERE excluded.updated_at_ms > app_chats.updated_at_ms
-                    -- OR excluded.raw_conversation IS NOT NULL
-                    
-                    -- Optimize for covering index
-                    -- INDEXED BY idx_app_chats_activity
-                    
-                    -- Batch update for better performance
-                    -- RETURNING jid
-                    
-                    -- Trigger notification for UI update
-                    -- NOTIFY chat_updated, excluded.jid
                     "
                     ,
                     params![
@@ -133,6 +133,12 @@ fn flush(conn: &mut Connection, buffer: &mut Vec<StorageCommand>) {
                         Utc::now().timestamp_millis()
                     ],
                 );
+                
+                if let Err(e) = result {
+                    log::error!("Failed to persist chat {}: {}", chat.jid.0, e);
+                } else {
+                    log::debug!("Successfully persisted chat {}", chat.jid.0);
+                }
             }
             StorageCommand::UpsertMessage(message) => {
                 let _ = tx.execute(

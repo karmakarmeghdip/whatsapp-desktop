@@ -23,6 +23,7 @@ pub fn load_snapshot(db_path: &Path) -> (Vec<Chat>, Vec<StoredMessage>) {
 
     let contact_map = load_contact_map(&conn);
     let chats = load_chats(&conn, &contact_map);
+    log::info!("Loaded {} chats from database", chats.len());
     let messages = load_messages(&conn);
 
     (chats, messages)
@@ -54,7 +55,7 @@ fn load_contact_map(conn: &Connection) -> HashMap<String, String> {
 fn load_chats(conn: &Connection, contact_map: &HashMap<String, String>) -> Vec<Chat> {
     let mut stmt = match conn.prepare(
         "
-        SELECT c.jid, c.name, c.last_message, c.last_activity_ms, c.is_group, c.unread_count, c.is_muted, c.is_pinned
+        SELECT c.jid, c.name, CAST(c.last_message AS TEXT), c.last_activity_ms, c.is_group, c.unread_count, c.is_muted, c.is_pinned
         FROM app_chats c
         INNER JOIN (
             SELECT chat_jid, COUNT(*) as msg_count
@@ -66,23 +67,41 @@ fn load_chats(conn: &Connection, contact_map: &HashMap<String, String>) -> Vec<C
         "
     ) {
         Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::error!("Failed to prepare chat query: {}", e);
+            return Vec::new();
+        }
     };
 
     let rows = match stmt.query_map([], |row| {
         let jid: String = row.get(0)?;
-        let mut name: String = row.get(1)?;
+        let name_from_db: String = row.get(1)?;
+        
+        // Read last_message as bytes and convert to string
+        let last_message = match row.get::<_, Option<Vec<u8>>>(2) {
+            Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
+            Ok(None) => None,
+            Err(e) => {
+                log::debug!("Failed to get last_message for {}: {}", jid, e);
+                None
+            }
+        };
+        
+        // Use contact name if available (for both individuals and groups)
         let normalized = normalize_user_from_jid(&jid);
-        if !jid.contains("@g.us")
-            && let Some(contact_name) = contact_map.get(&normalized)
-        {
-            name = contact_name.clone();
-        }
+        
+        let name = if let Some(contact_name) = contact_map.get(&normalized) {
+            contact_name.clone()
+        } else if name_from_db.is_empty() || name_from_db == normalized {
+            jid.clone()
+        } else {
+            name_from_db
+        };
 
         Ok(Chat {
             jid: Jid(jid),
             name,
-            last_message: row.get::<_, Option<String>>(2)?,
+            last_message,
             last_activity: row
                 .get::<_, Option<i64>>(3)?
                 .and_then(DateTime::<Utc>::from_timestamp_millis),
@@ -93,10 +112,31 @@ fn load_chats(conn: &Connection, contact_map: &HashMap<String, String>) -> Vec<C
         })
     }) {
         Ok(rows) => rows,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::error!("Failed to execute query: {}", e);
+            return Vec::new();
+        }
     };
 
-    rows.filter_map(Result::ok).collect()
+    let mut chats = Vec::new();
+    let mut error_count = 0;
+    for (i, row) in rows.enumerate() {
+        match row {
+            Ok(chat) => chats.push(chat),
+            Err(e) => {
+                error_count += 1;
+                if error_count <= 5 {
+                    log::error!("Failed to parse row {}: {}", i, e);
+                }
+            }
+        }
+    }
+    
+    if error_count > 0 {
+        log::error!("Total parse errors: {}", error_count);
+    }
+    
+    chats
 }
 
 /// Load recent messages from the database

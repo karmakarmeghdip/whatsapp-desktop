@@ -354,6 +354,17 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                     let id = conv.id.clone();
                                     if !id.is_empty() {
                                         let jid = Jid::new(id.clone());
+                                        
+                                        // Log all available name fields
+                                        log::info!(
+                                            "JoinedGroup: id={}, display_name={:?}, name={:?}, username={:?}, pn_jid={:?}",
+                                            id,
+                                            conv.display_name,
+                                            conv.name,
+                                            conv.username,
+                                            conv.pn_jid
+                                        );
+                                        
                                         let name = conv
                                             .display_name
                                             .clone()
@@ -362,14 +373,16 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                             .or_else(|| conv.pn_jid.as_ref().map(|jid| Jid::new(jid.clone()).display_label()))
                                             .unwrap_or_else(|| Jid::new(id.clone()).display_label());
 
+                                        log::info!("JoinedGroup: final name='{}' for jid={}", name, jid.0);
+
                                         let last_activity = conv
                                             .conversation_timestamp
                                             .or(conv.last_msg_timestamp)
                                             .and_then(|ts| DateTime::<Utc>::from_timestamp(ts as i64, 0));
 
                                         let chat = Chat {
-                                            jid,
-                                            name,
+                                            jid: jid.clone(),
+                                            name: name.clone(),
                                             last_message: None,
                                             last_activity,
                                             is_group: id.contains("@g.us"),
@@ -378,8 +391,19 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                             is_pinned: conv.pinned.unwrap_or(0) > 0,
                                         };
 
-                                        let raw_conversation = conv.encode_to_vec();
-                                        storage_writer.persist_chat(chat.clone(), Some(raw_conversation));
+                                        // Only persist if we have a proper name (not just JID)
+                                        let has_proper_name = conv.display_name.is_some() 
+                                            || conv.name.is_some() 
+                                            || conv.username.is_some();
+                                        
+                                        if has_proper_name {
+                                            let raw_conversation = conv.encode_to_vec();
+                                            storage_writer.persist_chat(chat.clone(), Some(raw_conversation));
+                                            log::info!("Persisted chat {} with proper name: '{}'", jid.0, name);
+                                        } else {
+                                            log::warn!("Skipping persist for {} - no proper name available (using: '{}')", jid.0, name);
+                                            // Still update UI but don't persist to DB
+                                        }
                                         output.send(WhatsAppEvent::ChatUpdated(chat)).await;
 
                                         if let Some(full_conv) = lazy_conv.get_with_messages() {
@@ -499,6 +523,31 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                             name: update.new_push_name,
                                         })
                                         .await;
+                                }
+                            }
+                            Event::GroupUpdate(update) => {
+                                use wacore::stanza::groups::GroupNotificationAction;
+                                
+                                if let GroupNotificationAction::Subject { subject, .. } = &update.action {
+                                    if !subject.trim().is_empty() {
+                                        let group_jid = Jid::new(update.group_jid.to_string());
+                                        log::info!("Group name updated: {} -> '{}'", group_jid.0, subject);
+                                        
+                                        // Update the chat with the new name
+                                        let chat = Chat {
+                                            jid: group_jid.clone(),
+                                            name: subject.clone(),
+                                            last_message: None,
+                                            last_activity: Some(Utc::now()),
+                                            is_group: true,
+                                            unread_count: 0,
+                                            is_muted: false,
+                                            is_pinned: false,
+                                        };
+                                        
+                                        storage_writer.persist_chat(chat.clone(), None);
+                                        output.send(WhatsAppEvent::ChatUpdated(chat)).await;
+                                    }
                                 }
                             }
                             _ => {

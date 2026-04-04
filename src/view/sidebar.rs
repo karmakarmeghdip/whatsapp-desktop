@@ -5,6 +5,20 @@ use iced::{Element, Length};
 use crate::controller::Message;
 use crate::model::{Chat, Jid};
 
+/// Maximum characters to show in the last message preview
+const MAX_PREVIEW_CHARS: usize = 45;
+
+/// Truncate text to fit within sidebar width, adding ellipsis if truncated
+fn truncate_preview(text: &str) -> String {
+    let char_count = text.chars().count();
+    if char_count <= MAX_PREVIEW_CHARS {
+        text.to_string()
+    } else {
+        let truncated: String = text.chars().take(MAX_PREVIEW_CHARS).collect();
+        format!("{}...", truncated)
+    }
+}
+
 /// Render the sidebar with chat list
 pub fn sidebar<'a>(
     chats: &'a [Chat],
@@ -58,7 +72,7 @@ pub fn sidebar<'a>(
                         pin_indicator,
                     ]
                     .align_y(iced::Alignment::Center),
-                    text(&chat.last_message)
+                    text(truncate_preview(&chat.last_message))
                         .size(13)
                         .style(|theme: &iced::Theme| text::Style {
                             color: Some(theme.palette().background.strongest.color),
