@@ -81,6 +81,9 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
                 return Task::none();
             }
 
+            // Track scroll position for auto-scroll behavior
+            let _is_at_bottom = state.update_scroll_position(viewport.relative_offset().y);
+
             if viewport.relative_offset().y <= 0.02
                 && let Some((chat_jid, oldest_msg_id, oldest_msg_from_me, oldest_msg_timestamp_ms)) =
                     state.selected_chat_history_cursor()
@@ -149,14 +152,21 @@ fn handle_rpc_notification(state: &mut AppState, notification: RpcNotification) 
         }
 
         RpcNotification::MessageReceived(msg) => {
-            log::debug!("Message received: {:?}", msg.id);
+            let should_scroll = state.should_auto_scroll();
+            let is_for_selected = state.selected_chat.as_ref().map(|s| s.0 == msg.chat.0).unwrap_or(false);
             state.add_rpc_message(msg);
+            if should_scroll && is_for_selected {
+                return scroll_to_bottom();
+            }
         }
 
         RpcNotification::MessageSent { local_id, message_id, chat_jid } => {
-            log::debug!("Message sent: {} -> {} ({})", local_id, message_id, chat_jid);
+            let should_scroll = state.should_auto_scroll();
             state.resolve_pending_message_id(&chat_jid, &local_id, &message_id);
             state.update_message_status(&message_id, MessageStatus::Sent);
+            if should_scroll {
+                return scroll_to_bottom();
+            }
         }
 
         RpcNotification::MessageSendFailed { local_id, chat_jid, error } => {
@@ -184,8 +194,12 @@ fn handle_rpc_notification(state: &mut AppState, notification: RpcNotification) 
         }
 
         RpcNotification::TypingIndicator { chat_jid, sender_jid, state: typing_state } => {
-            log::trace!("{} typing in {}: {:?}", sender_jid, chat_jid, typing_state);
+            let should_scroll = state.should_auto_scroll();
+            let is_for_selected = state.selected_chat.as_ref().map(|s| s.0 == chat_jid.0).unwrap_or(false);
             state.set_typing(chat_jid, sender_jid, convert_rpc_typing_state(typing_state));
+            if should_scroll && is_for_selected {
+                return scroll_to_bottom();
+            }
         }
 
         RpcNotification::PresenceUpdated(presence) => {
@@ -242,6 +256,12 @@ fn convert_rpc_message_status(rpc_status: rpc::MessageStatus) -> MessageStatus {
         rpc::MessageStatus::Read => MessageStatus::Read,
         rpc::MessageStatus::Failed => MessageStatus::Failed,
     }
+}
+
+/// Scroll the message list to the bottom
+fn scroll_to_bottom() -> Task<Message> {
+    use iced::widget::{operation, scrollable};
+    operation::snap_to(chat_scroll_id(), scrollable::RelativeOffset::END)
 }
 
 /// Convert RPC typing state to model typing state

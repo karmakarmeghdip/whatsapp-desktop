@@ -23,7 +23,7 @@ pub enum TypingState {
 }
 
 /// Central application state - the single source of truth
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AppState {
     // Connection state
     pub connection: ConnectionState,
@@ -50,6 +50,35 @@ pub struct AppState {
     history_request_state: HashMap<String, (String, DateTime<Utc>)>,
     pub loading_older_messages: bool,
     older_loading_updated_at: Option<DateTime<Utc>>,
+    /// Whether the message list is scrolled to the bottom (within threshold)
+    pub is_scrolled_to_bottom: bool,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            connection: ConnectionState::default(),
+            rpc_client: None,
+            view: ViewState::default(),
+            qr_code: None,
+            qr_code_data: None,
+            error: None,
+            sync_in_progress: false,
+            sync_progress: None,
+            sync_last_update: None,
+            chats: Vec::new(),
+            selected_chat: None,
+            messages: HashMap::new(),
+            chat_preview_timestamps: HashMap::new(),
+            input_value: String::new(),
+            typing_indicators: HashMap::new(),
+            ignore_next_scroll_event: false,
+            history_request_state: HashMap::new(),
+            loading_older_messages: false,
+            older_loading_updated_at: None,
+            is_scrolled_to_bottom: true, // Start at bottom
+        }
+    }
 }
 
 impl AppState {
@@ -62,6 +91,7 @@ impl AppState {
         self.ignore_next_scroll_event = true;
         self.loading_older_messages = false;
         self.older_loading_updated_at = None;
+        self.is_scrolled_to_bottom = true; // Reset to bottom when switching chats
     }
 
     pub fn consume_scroll_ignore_flag(&mut self) -> bool {
@@ -71,6 +101,18 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    /// Update scroll position tracking. Returns true if user is near bottom.
+    pub fn update_scroll_position(&mut self, relative_offset_y: f32) -> bool {
+        // Consider "at bottom" if within 5% of the end
+        self.is_scrolled_to_bottom = relative_offset_y >= 0.95;
+        self.is_scrolled_to_bottom
+    }
+
+    /// Check if we should auto-scroll (user is at bottom)
+    pub fn should_auto_scroll(&self) -> bool {
+        self.is_scrolled_to_bottom
     }
 
     pub fn selected_chat_history_cursor(&self) -> Option<(Jid, String, bool, i64)> {
