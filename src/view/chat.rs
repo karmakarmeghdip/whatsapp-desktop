@@ -3,8 +3,7 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length};
 use crate::controller::Message;
-use crate::model::{ChatMessage, MessageStatus};
-use crate::whatsapp::TypingState;
+use crate::model::{ChatMessage, MessageStatus, TypingState};
 
 pub fn messages_scroll_id() -> &'static str {
     "messages-scroll"
@@ -35,12 +34,13 @@ pub fn chat_view<'a>(
     });
 
     // Messages list
-    let mut message_list = column![].spacing(8).padding(15);
+    let mut message_list = column![];
+    message_list = message_list.spacing(8);
+    message_list = message_list.padding(15);
 
     for msg in messages {
         let is_me = msg.is_from_me;
 
-        // Status indicator for sent messages
         let status_text = if is_me {
             match msg.status {
                 MessageStatus::Pending => " ⏳",
@@ -80,7 +80,6 @@ pub fn chat_view<'a>(
         message_list = message_list.push(msg_row);
     }
 
-    // Typing indicator
     if let Some(typing_state) = typing {
         let typing_text = match typing_state {
             TypingState::Typing => "typing...",

@@ -46,7 +46,7 @@ pub enum WhatsAppCommand {
 
 /// Connection handle for sending commands to WhatsApp
 #[derive(Debug, Clone)]
-pub struct Connection(mpsc::Sender<WhatsAppCommand>);
+pub struct Connection(pub mpsc::Sender<WhatsAppCommand>);
 
 impl Connection {
     /// Send a command to the WhatsApp client

@@ -1,32 +1,28 @@
 //! Chat and message types for the application model
 
 use chrono::{DateTime, Utc};
-use crate::whatsapp::{self, Jid};
+use crate::model::Jid;
+use crate::rpc::{Chat as RpcChat, ChatMessage as RpcChatMessage, MessageStatus as RpcMessageStatus};
 
 /// Message delivery/read status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MessageStatus {
-    /// Message is being sent
     #[default]
     Pending,
-    /// Message sent to server
     Sent,
-    /// Message delivered to recipient
     Delivered,
-    /// Message read by recipient
     Read,
-    /// Message failed to send
     Failed,
 }
 
-impl From<whatsapp::MessageStatus> for MessageStatus {
-    fn from(status: whatsapp::MessageStatus) -> Self {
+impl From<RpcMessageStatus> for MessageStatus {
+    fn from(status: RpcMessageStatus) -> Self {
         match status {
-            whatsapp::MessageStatus::Pending => Self::Pending,
-            whatsapp::MessageStatus::Sent => Self::Sent,
-            whatsapp::MessageStatus::Delivered => Self::Delivered,
-            whatsapp::MessageStatus::Read => Self::Read,
-            whatsapp::MessageStatus::Failed => Self::Failed,
+            RpcMessageStatus::Pending => Self::Pending,
+            RpcMessageStatus::Sent => Self::Sent,
+            RpcMessageStatus::Delivered => Self::Delivered,
+            RpcMessageStatus::Read => Self::Read,
+            RpcMessageStatus::Failed => Self::Failed,
         }
     }
 }
@@ -34,20 +30,15 @@ impl From<whatsapp::MessageStatus> for MessageStatus {
 /// A chat conversation in the model
 #[derive(Debug, Clone)]
 pub struct Chat {
-    /// Unique identifier (JID)
     pub jid: Jid,
-    /// Display name
     pub name: String,
-    /// Preview of last message
     pub last_message: String,
-    /// Number of unread messages
     pub unread_count: u32,
-    /// Whether this chat is pinned
     pub is_pinned: bool,
 }
 
-impl From<whatsapp::Chat> for Chat {
-    fn from(chat: whatsapp::Chat) -> Self {
+impl From<RpcChat> for Chat {
+    fn from(chat: RpcChat) -> Self {
         Self {
             jid: chat.jid,
             name: chat.name,
@@ -61,20 +52,14 @@ impl From<whatsapp::Chat> for Chat {
 /// A message in a chat
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
-    /// Unique message ID
     pub id: String,
-    /// Whether this message was sent by the current user
     pub is_from_me: bool,
-    /// Message content (text preview)
     pub content: String,
-    /// When the message was sent
     pub timestamp: DateTime<Utc>,
-    /// Delivery status
     pub status: MessageStatus,
 }
 
 impl ChatMessage {
-    /// Create a new pending outgoing message
     pub fn new_outgoing(content: String) -> Self {
         Self::new_outgoing_with_id(
             format!("pending_{}", Utc::now().timestamp_millis()),
@@ -82,7 +67,6 @@ impl ChatMessage {
         )
     }
 
-    /// Create a new pending outgoing message with a provided local ID
     pub fn new_outgoing_with_id(id: String, content: String) -> Self {
         Self {
             id,
@@ -94,8 +78,8 @@ impl ChatMessage {
     }
 }
 
-impl From<whatsapp::ChatMessage> for ChatMessage {
-    fn from(msg: whatsapp::ChatMessage) -> Self {
+impl From<RpcChatMessage> for ChatMessage {
+    fn from(msg: RpcChatMessage) -> Self {
         Self {
             id: msg.id,
             is_from_me: msg.is_from_me,

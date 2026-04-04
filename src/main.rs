@@ -1,6 +1,7 @@
 mod app;
 mod controller;
 mod model;
+mod rpc;
 mod view;
 mod whatsapp;
 

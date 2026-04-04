@@ -11,4 +11,7 @@ mod state;
 // Re-export main types
 pub use chat::{Chat, ChatMessage, MessageStatus};
 pub use connection::{ConnectionState, ViewState};
-pub use state::AppState;
+pub use state::{AppState, TypingState};
+
+// Re-export RPC Jid as the canonical Jid type for the model
+pub use crate::rpc::Jid;

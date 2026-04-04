@@ -5,9 +5,9 @@
 
 mod client;
 mod events;
-mod storage;
+pub mod storage;
 mod types;
 
-pub use client::{connect, Connection, WhatsAppCommand};
+pub use client::{Connection, WhatsAppCommand};
 pub use events::WhatsAppEvent;
 pub use types::*;

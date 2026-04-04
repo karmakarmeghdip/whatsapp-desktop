@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use crate::whatsapp::{self, Connection, Jid, TypingState};
-use super::chat::{Chat, ChatMessage, MessageStatus};
-use super::connection::{ConnectionState, ViewState};
+use crate::model::{Chat, ChatMessage, MessageStatus};
+use crate::model::connection::{ConnectionState, ViewState};
+use crate::rpc::{self, RpcClientHandle, Jid};
 
 #[derive(Debug, Clone)]
 struct TypingIndicator {
@@ -14,64 +14,49 @@ struct TypingIndicator {
     updated_at: DateTime<Utc>,
 }
 
+/// Typing indicator state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypingState {
+    Idle,
+    Typing,
+    Recording,
+}
+
 /// Central application state - the single source of truth
 #[derive(Debug, Default)]
 pub struct AppState {
     // Connection state
-    /// Current connection to WhatsApp
     pub connection: ConnectionState,
-    /// Handle for sending commands to WhatsApp
-    pub whatsapp: Option<Connection>,
-    /// Which view to display
+    pub rpc_client: Option<RpcClientHandle>,
     pub view: ViewState,
-    /// QR code data (if available for pairing)
     pub qr_code: Option<String>,
-    /// Parsed QR code data for rendering
-    #[allow(dead_code)] // Might only be used in view
+    #[allow(dead_code)]
     pub qr_code_data: Option<iced::widget::qr_code::Data>,
-    /// Current error message (if any)
     pub error: Option<String>,
-    /// Whether offline/history sync is in progress
     pub sync_in_progress: bool,
-    /// History sync progress (current, total)
     pub sync_progress: Option<(u32, u32)>,
-    /// Last time sync progress was updated
     sync_last_update: Option<DateTime<Utc>>,
 
     // Chat data
-    /// All chat conversations
     pub chats: Vec<Chat>,
-    /// Currently selected chat JID
     pub selected_chat: Option<Jid>,
-    /// Messages indexed by chat JID string
     pub messages: HashMap<String, Vec<ChatMessage>>,
-    /// Last timestamp used for chat preview updates
     chat_preview_timestamps: HashMap<String, DateTime<Utc>>,
 
     // UI state
-    /// Current text in the message input
     pub input_value: String,
-    /// Typing indicators: chat_jid -> (sender_jid -> state)
     typing_indicators: HashMap<String, HashMap<String, TypingIndicator>>,
-    /// Ignore the next scroll callback after programmatic snap-to-end
     ignore_next_scroll_event: bool,
-    /// Last history request per chat: (oldest_message_id, requested_at)
     history_request_state: HashMap<String, (String, DateTime<Utc>)>,
-    /// Whether older messages are currently loading for selected chat
     pub loading_older_messages: bool,
-    /// Last update time for older-messages loading indicator
     older_loading_updated_at: Option<DateTime<Utc>>,
 }
 
 impl AppState {
-    /// Create a new empty state
     pub fn new() -> Self {
         Self::default()
     }
 
-    // --- Chat selection ---
-
-    /// Select a chat by JID
     pub fn select_chat(&mut self, jid: Jid) {
         self.selected_chat = Some(jid);
         self.ignore_next_scroll_event = true;
@@ -79,7 +64,6 @@ impl AppState {
         self.older_loading_updated_at = None;
     }
 
-    /// Consume one scroll event that should be ignored after programmatic scroll
     pub fn consume_scroll_ignore_flag(&mut self) -> bool {
         if self.ignore_next_scroll_event {
             self.ignore_next_scroll_event = false;
@@ -89,7 +73,6 @@ impl AppState {
         }
     }
 
-    /// Determine whether we should request older history for selected chat
     pub fn selected_chat_history_cursor(&self) -> Option<(Jid, String, bool, i64)> {
         let chat = self.selected_chat.as_ref()?.clone();
         let list = self.messages.get(&chat.0)?;
@@ -103,7 +86,6 @@ impl AppState {
         ))
     }
 
-    /// Decide if requesting older history is allowed for the given cursor and mark request state.
     pub fn start_older_history_request_if_allowed(
         &mut self,
         chat_jid: &Jid,
@@ -129,14 +111,12 @@ impl AppState {
         true
     }
 
-    /// Get the currently selected chat
     pub fn selected_chat(&self) -> Option<&Chat> {
         self.selected_chat.as_ref().and_then(|jid| {
             self.chats.iter().find(|c| &c.jid == jid)
         })
     }
 
-    /// Get messages for the selected chat
     pub fn selected_messages(&self) -> &[ChatMessage] {
         self.selected_chat
             .as_ref()
@@ -145,20 +125,14 @@ impl AppState {
             .unwrap_or(&[])
     }
 
-    // --- Message input ---
-
-    /// Update the input field value
     pub fn set_input(&mut self, value: String) {
         self.input_value = value;
     }
 
-    /// Clear the input field
     pub fn clear_input(&mut self) {
         self.input_value.clear();
     }
 
-    /// Get the JID and text for sending, clearing the input
-    /// Returns None if no chat selected or input is empty
     pub fn take_message_to_send(&mut self) -> Option<(Jid, String)> {
         if self.input_value.is_empty() {
             return None;
@@ -169,9 +143,6 @@ impl AppState {
         Some((jid, text))
     }
 
-    // --- Message management ---
-
-    /// Add a pending outgoing message for immediate UI feedback
     pub fn add_pending_message(&mut self, chat_jid: &Jid, content: String) -> String {
         let local_id = format!("pending_{}", Utc::now().timestamp_millis());
         let msg = ChatMessage::new_outgoing_with_id(local_id.clone(), content.clone());
@@ -181,8 +152,7 @@ impl AppState {
         local_id
     }
 
-    /// Add a received message
-    pub fn add_message(&mut self, msg: whatsapp::ChatMessage) {
+    pub fn add_rpc_message(&mut self, msg: rpc::ChatMessage) {
         let chat_jid = msg.chat.0.clone();
         let chat_msg: ChatMessage = msg.into();
 
@@ -215,7 +185,6 @@ impl AppState {
         }
     }
 
-    /// Update a message's delivery status
     pub fn update_message_status(&mut self, message_id: &str, status: MessageStatus) {
         for messages in self.messages.values_mut() {
             if let Some(msg) = messages.iter_mut().find(|m| m.id == message_id) {
@@ -225,7 +194,6 @@ impl AppState {
         }
     }
 
-    /// Update message status in a specific chat
     pub fn update_specific_message_status(&mut self, chat_jid: &Jid, message_id: &str, status: MessageStatus) {
         if let Some(messages) = self.messages.get_mut(&chat_jid.0)
             && let Some(msg) = messages.iter_mut().find(|m| m.id == message_id)
@@ -234,7 +202,6 @@ impl AppState {
         }
     }
 
-    /// Replace a local pending message ID with server message ID
     pub fn resolve_pending_message_id(&mut self, chat_jid: &Jid, local_id: &str, server_id: &str) {
         if let Some(messages) = self.messages.get_mut(&chat_jid.0)
             && let Some(msg) = messages.iter_mut().find(|m| m.id == local_id)
@@ -244,18 +211,14 @@ impl AppState {
         }
     }
 
-    // --- Chat management ---
-
-    /// Replace all chats
-    pub fn set_chats(&mut self, chats: Vec<whatsapp::Chat>) {
+    pub fn set_chats_from_rpc(&mut self, chats: Vec<rpc::Chat>) {
         self.chats = chats.into_iter().map(Chat::from).collect();
         if !self.chats.is_empty() && self.can_show_chats_view() {
             self.view = ViewState::Chats;
         }
     }
 
-    /// Update or add a single chat
-    pub fn update_chat(&mut self, chat: whatsapp::Chat) {
+    pub fn update_chat_from_rpc(&mut self, chat: rpc::Chat) {
         let chat: Chat = chat.into();
         if let Some(existing) = self.chats.iter_mut().find(|c| c.jid == chat.jid) {
             *existing = chat;
@@ -268,7 +231,6 @@ impl AppState {
         }
     }
 
-    /// Update display name for contact chats
     pub fn update_contact_name(&mut self, jid: &Jid, name: &str) {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -290,9 +252,6 @@ impl AppState {
         let _ = updated;
     }
 
-    // --- Typing indicators ---
-
-    /// Set typing state for a user in a chat
     pub fn set_typing(&mut self, chat_jid: Jid, sender_jid: Jid, state: TypingState) {
         self.typing_indicators
             .entry(chat_jid.0)
@@ -306,7 +265,6 @@ impl AppState {
             );
     }
 
-    /// Get the active typing state for the selected chat (if any)
     pub fn selected_typing_state(&self) -> Option<TypingState> {
         self.selected_chat.as_ref().and_then(|jid| {
             self.typing_indicators
@@ -319,19 +277,14 @@ impl AppState {
         })
     }
 
-    // --- Connection state ---
-
-    /// Set the WhatsApp connection handle
-    pub fn set_whatsapp_connection(&mut self, connection: Connection) {
-        self.whatsapp = Some(connection);
+    pub fn set_rpc_client(&mut self, client: RpcClientHandle) {
+        self.rpc_client = Some(client);
     }
 
-    /// Clear the WhatsApp connection (on disconnect/logout)
-    pub fn clear_whatsapp_connection(&mut self) {
-        self.whatsapp = None;
+    pub fn clear_rpc_client(&mut self) {
+        self.rpc_client = None;
     }
 
-    /// Update connection state and adjust view accordingly
     pub fn set_connection_state(&mut self, state: ConnectionState) {
         match &state {
             ConnectionState::Connected => {
@@ -361,25 +314,21 @@ impl AppState {
         self.connection = state;
     }
 
-    /// Update history sync progress and sync state
     pub fn set_sync_progress(&mut self, current: u32, total: u32) {
         self.sync_in_progress = true;
         self.sync_progress = Some((current, total.max(current)));
         self.sync_last_update = Some(Utc::now());
     }
 
-    /// Mark history sync as completed
     pub fn finish_sync(&mut self) {
         self.sync_in_progress = false;
         self.sync_progress = None;
         self.sync_last_update = None;
     }
 
-    /// Cleanup stale typing indicators and hanging sync banners
     pub fn cleanup_temporary_state(&mut self) {
         let now = Utc::now();
 
-        // Typing indicator timeout: 8 seconds
         self.typing_indicators.retain(|_, indicators| {
             indicators.retain(|_, entry| {
                 entry.state != TypingState::Idle
@@ -388,7 +337,6 @@ impl AppState {
             !indicators.is_empty()
         });
 
-        // Sync banner timeout: clear if stale for 8 seconds
         if self.sync_in_progress
             && self
                 .sync_last_update
@@ -397,7 +345,6 @@ impl AppState {
             self.finish_sync();
         }
 
-        // Older-history loading indicator timeout fallback
         if self.loading_older_messages
             && self
                 .older_loading_updated_at
@@ -444,12 +391,10 @@ impl AppState {
         )
     }
 
-    /// Set an error message
     pub fn set_error(&mut self, error: String) {
         self.error = Some(error);
     }
 
-    /// Clear the error message
     pub fn clear_error(&mut self) {
         self.error = None;
     }

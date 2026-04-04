@@ -3,8 +3,7 @@
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Element, Length};
 use crate::controller::Message;
-use crate::model::Chat;
-use crate::whatsapp::Jid;
+use crate::model::{Chat, Jid};
 
 /// Render the sidebar with chat list
 pub fn sidebar<'a>(
@@ -12,9 +11,10 @@ pub fn sidebar<'a>(
     selected_chat: Option<&'a Jid>,
     sync_progress: Option<(u32, u32)>,
 ) -> Element<'a, Message> {
-    let mut chat_list = column![].spacing(5).padding(10);
+    let mut chat_list = column![];
+    chat_list = chat_list.spacing(5);
+    chat_list = chat_list.padding(10);
 
-    // Sort chats: pinned first
     let mut sorted_chats: Vec<_> = chats.iter().collect();
     sorted_chats.sort_by(|a, b| b.is_pinned.cmp(&a.is_pinned));
 
@@ -22,7 +22,6 @@ pub fn sidebar<'a>(
         let is_selected = selected_chat.map(|s| s == &chat.jid).unwrap_or(false);
         let jid = chat.jid.clone();
 
-        // Unread badge
         let unread_badge = if chat.unread_count > 0 {
             container(text(chat.unread_count.to_string()).size(12))
                 .padding([2, 8])
@@ -35,7 +34,6 @@ pub fn sidebar<'a>(
             container(Space::new())
         };
 
-        // Pin indicator
         let pin_indicator = if chat.is_pinned {
             text("📌").size(12)
         } else {
@@ -83,7 +81,6 @@ pub fn sidebar<'a>(
         chat_list = chat_list.push(chat_button);
     }
 
-    // Empty state
     if chats.is_empty() {
         chat_list = chat_list.push(
             container(
@@ -113,7 +110,6 @@ pub fn sidebar<'a>(
 
     container(
         column![
-            // Header
             container(
                 row![
                     text("Chats").size(22),
@@ -123,7 +119,6 @@ pub fn sidebar<'a>(
             .padding(15)
             .width(Length::Fill),
             sync_banner,
-            // Chat list
             scrollable(chat_list).height(Length::Fill)
         ],
     )

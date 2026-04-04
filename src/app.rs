@@ -6,17 +6,15 @@
 use iced::{Element, Subscription, Task, Theme};
 use crate::controller::{self, Message};
 use crate::model::AppState;
+use crate::rpc;
 use crate::view;
-use crate::whatsapp;
 
 /// Main application struct - holds the model and provides iced integration
 pub struct App {
-    /// The application model (single source of truth)
     state: AppState,
 }
 
 impl App {
-    /// Create a new application instance
     pub fn new() -> (Self, Task<Message>) {
         (
             Self {
@@ -26,7 +24,6 @@ impl App {
         )
     }
 
-    /// Window title - derived from model state
     pub fn title(&self) -> String {
         let suffix = match &self.state.connection {
             crate::model::ConnectionState::Connected => "",
@@ -40,25 +37,21 @@ impl App {
         format!("WhatsApp Desktop{}", suffix)
     }
 
-    /// Handle messages - delegates to controller
     pub fn update(&mut self, message: Message) -> Task<Message> {
         controller::update(&mut self.state, message)
     }
 
-    /// Render the view - delegates to view module
     pub fn view(&self) -> Element<'_, Message> {
         view::render(&self.state)
     }
 
-    /// Application theme
     pub fn theme(&self) -> Theme {
         Theme::CatppuccinMocha
     }
 
-    /// Background subscriptions - WhatsApp connection
     pub fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            Subscription::run(whatsapp::connect).map(Message::WhatsApp),
+            rpc::client::subscription().map(Message::RpcNotification),
             iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::Tick),
         ])
     }
