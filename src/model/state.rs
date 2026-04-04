@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use crate::whatsapp::{self, Connection, Jid, TypingState};
 use super::chat::{Chat, ChatMessage, MessageStatus};
-use super::cache;
 use super::connection::{ConnectionState, ViewState};
 
 #[derive(Debug, Clone)]
@@ -46,6 +45,8 @@ pub struct AppState {
     pub selected_chat: Option<Jid>,
     /// Messages indexed by chat JID string
     pub messages: HashMap<String, Vec<ChatMessage>>,
+    /// Last timestamp used for chat preview updates
+    chat_preview_timestamps: HashMap<String, DateTime<Utc>>,
 
     // UI state
     /// Current text in the message input
@@ -65,13 +66,7 @@ pub struct AppState {
 impl AppState {
     /// Create a new empty state
     pub fn new() -> Self {
-        let mut state = Self::default();
-        state.chats = cache::load_chats();
-        state.messages = cache::load_messages();
-        if !state.chats.is_empty() {
-            state.view = ViewState::Chats;
-        }
-        state
+        Self::default()
     }
 
     // --- Chat selection ---
@@ -182,8 +177,7 @@ impl AppState {
         let msg = ChatMessage::new_outgoing_with_id(local_id.clone(), content.clone());
         self.messages.entry(chat_jid.0.clone()).or_default().push(msg);
 
-        self.update_chat_preview(chat_jid, content);
-        self.save_messages_cache();
+        self.update_chat_preview(chat_jid, content, Utc::now());
         local_id
     }
 
@@ -196,11 +190,20 @@ impl AppState {
         if messages.iter().any(|m| m.id == chat_msg.id) {
             return;
         }
-        messages.push(chat_msg.clone());
-        messages.sort_by_key(|m| m.timestamp);
+        if messages
+            .last()
+            .is_none_or(|last| last.timestamp <= chat_msg.timestamp)
+        {
+            messages.push(chat_msg.clone());
+        } else {
+            let idx = messages
+                .binary_search_by_key(&chat_msg.timestamp, |m| m.timestamp)
+                .unwrap_or_else(|i| i);
+            messages.insert(idx, chat_msg.clone());
+        }
 
         let jid = Jid(chat_jid.clone());
-        self.update_chat_preview(&jid, chat_msg.content.clone());
+        self.update_chat_preview(&jid, chat_msg.content.clone(), chat_msg.timestamp);
 
         if self
             .selected_chat
@@ -210,8 +213,6 @@ impl AppState {
             self.loading_older_messages = false;
             self.older_loading_updated_at = None;
         }
-
-        self.save_messages_cache();
     }
 
     /// Update a message's delivery status
@@ -219,7 +220,6 @@ impl AppState {
         for messages in self.messages.values_mut() {
             if let Some(msg) = messages.iter_mut().find(|m| m.id == message_id) {
                 msg.status = status;
-                self.save_messages_cache();
                 return;
             }
         }
@@ -231,7 +231,6 @@ impl AppState {
             && let Some(msg) = messages.iter_mut().find(|m| m.id == message_id)
         {
             msg.status = status;
-            self.save_messages_cache();
         }
     }
 
@@ -242,7 +241,6 @@ impl AppState {
         {
             msg.id = server_id.to_string();
             msg.status = MessageStatus::Sent;
-            self.save_messages_cache();
         }
     }
 
@@ -251,8 +249,8 @@ impl AppState {
     /// Replace all chats
     pub fn set_chats(&mut self, chats: Vec<whatsapp::Chat>) {
         self.chats = chats.into_iter().map(Chat::from).collect();
-        if let Err(error) = cache::save_chats(&self.chats) {
-            log::warn!("Failed to save chat cache: {}", error);
+        if !self.chats.is_empty() && self.can_show_chats_view() {
+            self.view = ViewState::Chats;
         }
     }
 
@@ -264,8 +262,9 @@ impl AppState {
         } else {
             self.chats.push(chat);
         }
-        if let Err(error) = cache::save_chats(&self.chats) {
-            log::warn!("Failed to save chat cache: {}", error);
+
+        if self.can_show_chats_view() {
+            self.view = ViewState::Chats;
         }
     }
 
@@ -288,11 +287,7 @@ impl AppState {
             }
         }
 
-        if updated
-            && let Err(error) = cache::save_chats(&self.chats)
-        {
-            log::warn!("Failed to save chat cache: {}", error);
-        }
+        let _ = updated;
     }
 
     // --- Typing indicators ---
@@ -413,7 +408,16 @@ impl AppState {
         }
     }
 
-    fn update_chat_preview(&mut self, chat_jid: &Jid, preview: String) {
+    fn update_chat_preview(&mut self, chat_jid: &Jid, preview: String, timestamp: DateTime<Utc>) {
+        if let Some(last_ts) = self.chat_preview_timestamps.get(&chat_jid.0)
+            && timestamp < *last_ts
+        {
+            return;
+        }
+
+        self.chat_preview_timestamps
+            .insert(chat_jid.0.clone(), timestamp);
+
         if let Some(chat) = self.chats.iter_mut().find(|c| c.jid == *chat_jid) {
             chat.last_message = preview;
         } else {
@@ -426,15 +430,18 @@ impl AppState {
             });
         }
 
-        if let Err(error) = cache::save_chats(&self.chats) {
-            log::warn!("Failed to save chat cache: {}", error);
+        if self.can_show_chats_view() {
+            self.view = ViewState::Chats;
         }
     }
 
-    fn save_messages_cache(&self) {
-        if let Err(error) = cache::save_messages(&self.messages) {
-            log::warn!("Failed to save message cache: {}", error);
-        }
+    fn can_show_chats_view(&self) -> bool {
+        !matches!(
+            self.connection,
+            ConnectionState::WaitingForQr { .. }
+                | ConnectionState::WaitingForPairCode { .. }
+                | ConnectionState::LoggedOut
+        )
     }
 
     /// Set an error message

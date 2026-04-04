@@ -9,8 +9,10 @@ use futures::channel::mpsc;
 use futures::stream::StreamExt;
 use iced::task::{Never, Sipper, sipper};
 use chrono::{DateTime, Utc};
+use prost::Message as _;
 
 use super::events::WhatsAppEvent;
+use super::storage::{self, StoredMessage};
 use super::types::*;
 
 // Re-export types from the correct modules
@@ -106,6 +108,32 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
             }
 
             log::info!("Using database: {}", db_path.display());
+
+            let storage_writer = storage::spawn_writer(db_path.clone());
+            let (stored_chats, stored_messages) = storage::load_snapshot(&db_path);
+            for chat in stored_chats {
+                output.send(WhatsAppEvent::ChatUpdated(chat)).await;
+            }
+            for stored in stored_messages {
+                if let Ok(raw) = waproto::whatsapp::Message::decode(stored.raw_message.as_slice()) {
+                    let content = parse_message_content(&raw);
+                    let timestamp = DateTime::<Utc>::from_timestamp_millis(stored.timestamp_ms)
+                        .unwrap_or_else(Utc::now);
+
+                    output
+                        .send(WhatsAppEvent::MessageReceived(ChatMessage {
+                            id: stored.message_id,
+                            sender: Jid::new(stored.sender_jid),
+                            chat: Jid::new(stored.chat_jid),
+                            content,
+                            timestamp,
+                            is_from_me: stored.is_from_me,
+                            status: stored.status,
+                            quoted_message: None,
+                        }))
+                        .await;
+                }
+            }
             
             let backend = match SqliteStore::new(db_path.to_string_lossy().as_ref()).await {
                 Ok(store) => Arc::new(store),
@@ -238,7 +266,21 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                     quoted_message: None,
                                 };
 
+                                storage_writer.persist_message(StoredMessage {
+                                    message_id: info.id.clone(),
+                                    sender_jid: info.source.sender.to_string(),
+                                    chat_jid: info.source.chat.to_string(),
+                                    is_from_me: info.source.is_from_me,
+                                    timestamp_ms: info.timestamp.timestamp_millis(),
+                                    status: MessageStatus::Delivered,
+                                    raw_message: msg.encode_to_vec(),
+                                });
+
                                 if !info.push_name.is_empty() {
+                                    storage_writer.persist_contact_name(
+                                        info.source.sender.to_string(),
+                                        info.push_name.clone(),
+                                    );
                                     output
                                         .send(WhatsAppEvent::ContactNameUpdated {
                                             jid: Jid::new(info.source.sender.to_string()),
@@ -327,10 +369,13 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                             is_pinned: conv.pinned.unwrap_or(0) > 0,
                                         };
 
+                                        let raw_conversation = conv.encode_to_vec();
+                                        storage_writer.persist_chat(chat.clone(), Some(raw_conversation));
                                         output.send(WhatsAppEvent::ChatUpdated(chat)).await;
 
                                         if let Some(full_conv) = lazy_conv.get_with_messages() {
-                                            for item in full_conv.messages {
+                                            let total_messages = full_conv.messages.len();
+                                            for (idx, item) in full_conv.messages.into_iter().enumerate() {
                                                 let Some(web) = item.message else { continue; };
                                                 let Some(message) = web.message else { continue; };
 
@@ -366,7 +411,21 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                                     quoted_message: None,
                                                 };
 
-                                                output.send(WhatsAppEvent::MessageReceived(history_msg)).await;
+                                                let raw_message = message.encode_to_vec();
+                                                storage_writer.persist_message(StoredMessage {
+                                                    message_id: history_msg.id.clone(),
+                                                    sender_jid: history_msg.sender.0.clone(),
+                                                    chat_jid: history_msg.chat.0.clone(),
+                                                    is_from_me: history_msg.is_from_me,
+                                                    timestamp_ms: history_msg.timestamp.timestamp_millis(),
+                                                    status: history_msg.status,
+                                                    raw_message,
+                                                });
+
+                                                // Render only the latest slice during bulk sync to keep UI responsive.
+                                                if idx + 80 >= total_messages {
+                                                    output.send(WhatsAppEvent::MessageReceived(history_msg)).await;
+                                                }
                                             }
                                         }
 
@@ -389,6 +448,8 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                     .or(update.action.first_name.clone());
 
                                 if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
+                                    storage_writer
+                                        .persist_contact_name(update.jid.to_string(), name.clone());
                                     output
                                         .send(WhatsAppEvent::ContactNameUpdated {
                                             jid: Jid::new(update.jid.to_string()),
@@ -397,6 +458,7 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                         .await;
 
                                     if let Some(pn_jid) = update.action.pn_jid.as_ref() {
+                                        storage_writer.persist_contact_name(pn_jid.clone(), name.clone());
                                         output
                                             .send(WhatsAppEvent::ContactNameUpdated {
                                                 jid: Jid::new(pn_jid.clone()),
@@ -406,6 +468,7 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                                     }
 
                                     if let Some(lid_jid) = update.action.lid_jid.as_ref() {
+                                        storage_writer.persist_contact_name(lid_jid.clone(), name.clone());
                                         output
                                             .send(WhatsAppEvent::ContactNameUpdated {
                                                 jid: Jid::new(lid_jid.clone()),
@@ -417,6 +480,10 @@ pub fn connect() -> impl Sipper<Never, WhatsAppEvent> {
                             }
                             Event::PushNameUpdate(update) => {
                                 if !update.new_push_name.trim().is_empty() {
+                                    storage_writer.persist_contact_name(
+                                        update.jid.to_string(),
+                                        update.new_push_name.clone(),
+                                    );
                                     output
                                         .send(WhatsAppEvent::ContactNameUpdated {
                                             jid: Jid::new(update.jid.to_string()),
