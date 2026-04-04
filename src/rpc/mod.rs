@@ -5,6 +5,7 @@
 //! The goal is to allow the WhatsApp service to eventually run as a separate
 //! daemon process communicating over sockets via JSON-RPC.
 
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 pub mod client;
@@ -13,6 +14,19 @@ pub mod types;
 
 pub use client::RpcClientHandle;
 pub use types::*;
+
+/// Global storage for the RPC client handle so it can be accessed from the controller
+static RPC_CLIENT_HANDLE: OnceLock<RpcClientHandle> = OnceLock::new();
+
+/// Store the RPC client handle globally
+pub fn set_rpc_client_handle(handle: RpcClientHandle) {
+    let _ = RPC_CLIENT_HANDLE.set(handle);
+}
+
+/// Get a clone of the RPC client handle if it's been set
+pub fn get_rpc_client_handle() -> Option<RpcClientHandle> {
+    RPC_CLIENT_HANDLE.get().cloned()
+}
 
 /// RPC Request - commands from UI to service
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +56,8 @@ pub enum RpcRequest {
 /// RPC Notification - events from service to UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RpcNotification {
+    /// Service is ready and RPC client handle is available
+    ServiceReady,
     ConnectionStateChanged(ConnectionState),
     QrCodeReceived {
         qr_code: String,

@@ -74,8 +74,12 @@ impl RpcClient {
             let (notification_tx, mut notification_rx) =
                 tokio::sync::mpsc::unbounded_channel::<RpcNotification>();
 
-            // Store the handle so UI can send requests
-            let _handle = RpcClientHandle { sender: request_tx };
+            // Store the handle globally so UI can send requests
+            let handle = RpcClientHandle { sender: request_tx };
+            super::set_rpc_client_handle(handle);
+
+            // Notify UI that the service is ready
+            let _ = output.send(RpcNotification::ServiceReady).await;
 
             // Start the RPC service in a background task
             let _service_handle = tokio::spawn(super::service::run_rpc_service(

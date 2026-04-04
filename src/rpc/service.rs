@@ -46,10 +46,11 @@ pub async fn run_rpc_service(
                     whatsapp_connection = Some(conn.clone());
                 }
                 
-                let notification = convert_event_to_notification(event);
-                if notification_tx.send(notification).is_err() {
-                    log::error!("Failed to send notification - channel closed");
-                    break;
+                if let Some(notification) = convert_event_to_notification(event) {
+                    if notification_tx.send(notification).is_err() {
+                        log::error!("Failed to send notification - channel closed");
+                        break;
+                    }
                 }
             }
 
@@ -67,7 +68,7 @@ pub async fn run_rpc_service(
 /// Run the WhatsApp connection loop
 async fn run_whatsapp_connection(
     event_tx: tokio::sync::mpsc::UnboundedSender<WhatsAppEvent>,
-    mut command_rx: mpsc::Receiver<WhatsAppCommand>,
+    _command_rx: mpsc::Receiver<WhatsAppCommand>,
 ) {
     use whatsapp_rust::bot::Bot;
     use whatsapp_rust::TokioRuntime;
@@ -659,13 +660,13 @@ async fn handle_request(
 ) {
     match request {
         RpcRequest::SendMessage {
-            local_id: _,
+            local_id,
             chat_jid,
             text,
         } => {
             log::info!("RPC: SendMessage to {}: {}", chat_jid, text);
             if let Some(conn) = connection {
-                conn.send_message(whatsapp::Jid(chat_jid.0), text);
+                conn.send_message_with_id(local_id, whatsapp::Jid(chat_jid.0), text);
             }
         }
         RpcRequest::SendTyping { chat_jid, typing } => {
@@ -695,75 +696,76 @@ async fn handle_request(
     }
 }
 
-fn convert_event_to_notification(event: WhatsAppEvent) -> RpcNotification {
+fn convert_event_to_notification(event: WhatsAppEvent) -> Option<RpcNotification> {
     match event {
+        // ServiceReady is emitted directly, not converted from WhatsAppEvent
         WhatsAppEvent::ConnectionStateChanged(state) => {
-            RpcNotification::ConnectionStateChanged(convert_connection_state(state))
+            Some(RpcNotification::ConnectionStateChanged(convert_connection_state(state)))
         }
         WhatsAppEvent::QrCodeReceived { qr_code } => {
-            RpcNotification::QrCodeReceived { qr_code }
+            Some(RpcNotification::QrCodeReceived { qr_code })
         }
         WhatsAppEvent::PairCodeReceived { code } => {
-            RpcNotification::PairCodeReceived { code }
+            Some(RpcNotification::PairCodeReceived { code })
         }
-        WhatsAppEvent::Connected(_) => RpcNotification::ConnectionStateChanged(super::ConnectionState::Connected),
-        WhatsAppEvent::Disconnected => RpcNotification::ConnectionStateChanged(super::ConnectionState::Reconnecting),
-        WhatsAppEvent::LoggedOut => RpcNotification::ConnectionStateChanged(super::ConnectionState::LoggedOut),
+        WhatsAppEvent::Connected(_) => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::Connected)),
+        WhatsAppEvent::Disconnected => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::Reconnecting)),
+        WhatsAppEvent::LoggedOut => Some(RpcNotification::ConnectionStateChanged(super::ConnectionState::LoggedOut)),
         WhatsAppEvent::MessageReceived(msg) => {
-            RpcNotification::MessageReceived(convert_chat_message(msg))
+            Some(RpcNotification::MessageReceived(convert_chat_message(msg)))
         }
         WhatsAppEvent::MessageSent {
             local_id,
             message_id,
             chat_jid,
-        } => RpcNotification::MessageSent {
+        } => Some(RpcNotification::MessageSent {
             local_id,
             message_id,
             chat_jid: convert_jid(chat_jid),
-        },
+        }),
         WhatsAppEvent::MessageSendFailed {
             local_id,
             chat_jid,
             error,
-        } => RpcNotification::MessageSendFailed {
+        } => Some(RpcNotification::MessageSendFailed {
             local_id,
             chat_jid: convert_jid(chat_jid),
             error,
-        },
+        }),
         WhatsAppEvent::MessageStatusUpdated {
             message_id,
             chat_jid,
             status,
-        } => RpcNotification::MessageStatusUpdated {
+        } => Some(RpcNotification::MessageStatusUpdated {
             message_id,
             chat_jid: convert_jid(chat_jid),
             status: convert_message_status(status),
-        },
+        }),
         WhatsAppEvent::ChatsUpdated(chats) => {
-            RpcNotification::ChatsUpdated(chats.into_iter().map(convert_chat).collect())
+            Some(RpcNotification::ChatsUpdated(chats.into_iter().map(convert_chat).collect()))
         }
-        WhatsAppEvent::ChatUpdated(chat) => RpcNotification::ChatUpdated(convert_chat(chat)),
-        WhatsAppEvent::ContactNameUpdated { jid, name } => RpcNotification::ContactNameUpdated {
+        WhatsAppEvent::ChatUpdated(chat) => Some(RpcNotification::ChatUpdated(convert_chat(chat))),
+        WhatsAppEvent::ContactNameUpdated { jid, name } => Some(RpcNotification::ContactNameUpdated {
             jid: convert_jid(jid),
             name,
-        },
+        }),
         WhatsAppEvent::TypingIndicator {
             chat_jid,
             sender_jid,
             state,
-        } => RpcNotification::TypingIndicator {
+        } => Some(RpcNotification::TypingIndicator {
             chat_jid: convert_jid(chat_jid),
             sender_jid: convert_jid(sender_jid),
             state: convert_typing_state(state),
-        },
+        }),
         WhatsAppEvent::PresenceUpdated(presence) => {
-            RpcNotification::PresenceUpdated(convert_presence(presence))
+            Some(RpcNotification::PresenceUpdated(convert_presence(presence)))
         }
         WhatsAppEvent::HistorySyncProgress { current, total } => {
-            RpcNotification::HistorySyncProgress { current, total }
+            Some(RpcNotification::HistorySyncProgress { current, total })
         }
-        WhatsAppEvent::HistorySyncCompleted => RpcNotification::HistorySyncCompleted,
-        WhatsAppEvent::Error(error) => RpcNotification::Error(error),
+        WhatsAppEvent::HistorySyncCompleted => Some(RpcNotification::HistorySyncCompleted),
+        WhatsAppEvent::Error(error) => Some(RpcNotification::Error(error)),
     }
 }
 

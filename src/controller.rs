@@ -115,6 +115,13 @@ fn chat_scroll_id() -> &'static str {
 /// Handle notifications from the WhatsApp RPC service
 fn handle_rpc_notification(state: &mut AppState, notification: RpcNotification) -> Task<Message> {
     match notification {
+        RpcNotification::ServiceReady => {
+            log::info!("RPC service ready");
+            if let Some(handle) = crate::rpc::get_rpc_client_handle() {
+                state.set_rpc_client(handle);
+            }
+        }
+
         RpcNotification::ConnectionStateChanged(rpc_state) => {
             log::info!("Connection state: {:?}", rpc_state);
             let connection_state = convert_rpc_connection_state(rpc_state);

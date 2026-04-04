@@ -16,7 +16,16 @@ pub fn sidebar<'a>(
     chat_list = chat_list.padding(10);
 
     let mut sorted_chats: Vec<_> = chats.iter().collect();
-    sorted_chats.sort_by(|a, b| b.is_pinned.cmp(&a.is_pinned));
+    sorted_chats.sort_by(|a, b| {
+        // First sort by pinned status (pinned chats come first)
+        match b.is_pinned.cmp(&a.is_pinned) {
+            std::cmp::Ordering::Equal => {
+                // Then sort by last activity (most recent first)
+                b.last_activity.cmp(&a.last_activity)
+            }
+            other => other
+        }
+    });
 
     for chat in sorted_chats {
         let is_selected = selected_chat.map(|s| s == &chat.jid).unwrap_or(false);

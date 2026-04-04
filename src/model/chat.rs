@@ -33,6 +33,7 @@ pub struct Chat {
     pub jid: Jid,
     pub name: String,
     pub last_message: String,
+    pub last_activity: Option<DateTime<Utc>>,
     pub unread_count: u32,
     pub is_pinned: bool,
 }
@@ -43,6 +44,7 @@ impl From<RpcChat> for Chat {
             jid: chat.jid,
             name: chat.name,
             last_message: chat.last_message.unwrap_or_default(),
+            last_activity: chat.last_activity,
             unread_count: chat.unread_count,
             is_pinned: chat.is_pinned,
         }

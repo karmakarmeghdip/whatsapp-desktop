@@ -63,6 +63,15 @@ impl Connection {
         });
     }
 
+    /// Send a text message with a specific local ID
+    pub fn send_message_with_id(&mut self, local_id: String, chat_jid: Jid, text: String) {
+        self.send(WhatsAppCommand::SendMessage {
+            local_id,
+            chat_jid,
+            text,
+        });
+    }
+
     /// Send typing indicator
     pub fn send_typing(&mut self, chat_jid: Jid, typing: bool) {
         self.send(WhatsAppCommand::SendTyping { chat_jid, typing });

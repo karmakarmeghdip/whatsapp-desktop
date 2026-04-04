@@ -8,7 +8,7 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
-use super::super::{Chat, Jid, MessageStatus};
+use super::super::{Chat, Jid};
 use super::models::{StoredMessage, status_from_str};
 use super::schema::ensure_schema;
 
@@ -54,21 +54,15 @@ fn load_contact_map(conn: &Connection) -> HashMap<String, String> {
 fn load_chats(conn: &Connection, contact_map: &HashMap<String, String>) -> Vec<Chat> {
     let mut stmt = match conn.prepare(
         "
-        SELECT jid, name, last_message, last_activity_ms, is_group, unread_count, is_muted, is_pinned
-        FROM app_chats
-        ORDER BY is_pinned DESC, COALESCE(last_activity_ms, updated_at_ms) DESC
-        
-        -- Use index hint for better query planning
-        -- INDEXED BY idx_app_chats_pinned
-        
-        -- Limit to recent and pinned chats for performance
-        -- LIMIT 1000
-        
-        -- Optimize for covering index if available
-        -- Covering index on (is_pinned, last_activity_ms, jid, name, last_message, is_group, unread_count, is_muted)
-        
-        -- Use partial index for muted/pinned filtering
-        -- WHERE is_muted = 0 OR is_pinned = 1
+        SELECT c.jid, c.name, c.last_message, c.last_activity_ms, c.is_group, c.unread_count, c.is_muted, c.is_pinned
+        FROM app_chats c
+        INNER JOIN (
+            SELECT chat_jid, COUNT(*) as msg_count
+            FROM app_messages
+            GROUP BY chat_jid
+            HAVING msg_count > 0
+        ) m ON c.jid = m.chat_jid
+        ORDER BY c.is_pinned DESC, COALESCE(c.last_activity_ms, c.updated_at_ms) DESC
         "
     ) {
         Ok(stmt) => stmt,

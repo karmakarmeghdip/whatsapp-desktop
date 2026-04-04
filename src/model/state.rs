@@ -367,11 +367,13 @@ impl AppState {
 
         if let Some(chat) = self.chats.iter_mut().find(|c| c.jid == *chat_jid) {
             chat.last_message = preview;
+            chat.last_activity = Some(timestamp);
         } else {
             self.chats.push(Chat {
                 jid: chat_jid.clone(),
                 name: chat_jid.display_label(),
                 last_message: preview,
+                last_activity: Some(timestamp),
                 unread_count: 0,
                 is_pinned: false,
             });
